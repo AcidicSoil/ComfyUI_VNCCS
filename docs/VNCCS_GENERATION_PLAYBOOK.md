@@ -74,7 +74,7 @@ For visual samples, use the production **VNCCS Character Studio** as the primary
 `/home/user/projects/temp/ai-apps/.personal-projects/chatgpt-plans/playbooks/vnccs-generation-wizard/vnccs-character-studio.sh`
 
 The studio:
-- collects broad human constraints rather than raw tags;
+- collects broad human constraints rather than raw tags, including explicit sex (`Female` / `Male` / `Surprise me`) separately from presentation;
 - generates deterministic candidate identities from the installed Portrait Master vocabulary;
 - renders numbered previews through the real VNCCS `/vnccs/preview_generate` Anima path;
 - keeps comparison pose/expression/background/transient clothing neutral;

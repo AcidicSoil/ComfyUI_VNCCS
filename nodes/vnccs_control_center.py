@@ -847,16 +847,28 @@ def _local_model_family(rel_path, default_type):
     identity = normalized.lower()
     if not normalized:
         return None
-    ext = os.path.splitext(identity)[1]
+    path_parts = [part for part in identity.split("/") if part]
+    filename = path_parts[-1] if path_parts else ""
+    parent_parts = path_parts[:-1]
+    ext = os.path.splitext(filename)[1]
     model_type = "gguf" if ext == ".gguf" else default_type
-    if "klein" in identity:
+
+    if default_type == "checkpoint":
+        if "illustrious" in filename or any(part == "illustrious" for part in parent_parts):
+            return "Illustrious", "checkpoint"
+        return None
+
+    if "klein" in filename or any("klein" in part for part in parent_parts):
         return "Klein9b", model_type
-    if "anima" in identity:
+    anima_named = (
+        filename.startswith("anima")
+        or any(part == "anima" for part in parent_parts)
+        or bool(re.search(r"(?:^|[_-])anima(?!te)", filename))
+    )
+    if anima_named:
         return "Anima", model_type
     if "2511" in identity and ("qwen" in identity or "qie" in identity):
         return "QIE2511", model_type
-    if default_type == "checkpoint" and "illustrious" in identity:
-        return "Illustrious", "checkpoint"
     return None
 
 

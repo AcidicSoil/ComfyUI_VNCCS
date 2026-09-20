@@ -1243,6 +1243,9 @@ class TestLocalModelInventory:
         assert _local_model_family("klein-2-9b/msFlux2Klein9B_v5.safetensors", "unet") == ("Klein9b", "unet")
         assert _local_model_family("qwen/qwen-image-edit-2511-local.gguf", "unet") == ("QIE2511", "gguf")
         assert _local_model_family("Anima/anima-custom.safetensors", "unet") == ("Anima", "unet")
+        assert _local_model_family("styles/animaFinalcut12Step.safetensors", "unet") == ("Anima", "unet")
+        assert _local_model_family("wan2.2/wan22Animate14bFp16_v20.safetensors", "unet") is None
+        assert _local_model_family("anima/animaXxl_v10.safetensors", "checkpoint") is None
         assert _local_model_family("Illustrious/customMix.safetensors", "checkpoint") == ("Illustrious", "checkpoint")
         assert _local_model_family("flux/random-flux.safetensors", "unet") is None
 

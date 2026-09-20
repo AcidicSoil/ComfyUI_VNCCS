@@ -110,6 +110,8 @@ The runner uses committed Creator, Clothes, and Emotions templates. It owns the 
 
 Runs are convergent. If base, poses, an outfit, or requested emotion artifacts already exist and verify correctly, the runner skips that completed stage unless `--force` is supplied. Restart the same JSON brief after an interruption instead of rebuilding state manually.
 
+To keep the generated workflows for later manual editing/reuse, enable **Save reusable Creator, Clothes, and Emotions workflows to my ComfyUI user workflows** in Character Studio Production or run with `--save-user-workflows`. The runner saves normal UI workflows under `C:\Users\user\Documents\ComfyUI\user\default\workflows\VNCCS\Saved Runs\<character>\<run-id>\`, preserving the run's character, poses, costume settings, and requested emotions. These files must reopen directly in ComfyUI without relying on agent state or the last active browser character.
+
 In this mode, the generation agent must:
 
 1. Run Character Creator or Character Cloner according to the request.

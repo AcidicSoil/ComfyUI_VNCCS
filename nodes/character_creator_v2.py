@@ -24,7 +24,7 @@ from ..utils import (
     apply_sex, append_age, load_config, age_strength,
     list_characters, character_dir, base_output_dir,
     sheets_dir, faces_dir, normalize_hair_tags, ensure_safe_name,
-    get_full_path_agnostic,
+    get_full_path_agnostic, canonical_model_name,
 )
 from .vnccs_utils import _ensure_qwen_vl_assets
 
@@ -482,9 +482,18 @@ def _call_node_method(class_names, method_names, **kwargs):
 
 
 def load_anima_assets(gen_settings):
-    diffusion_model_name = gen_settings.get("diffusion_model_name")
-    clip_name = gen_settings.get("clip_name")
-    vae_name = gen_settings.get("vae_name")
+    requested_diffusion_model_name = gen_settings.get("diffusion_model_name")
+    requested_clip_name = gen_settings.get("clip_name")
+    requested_vae_name = gen_settings.get("vae_name")
+    diffusion_model_name = (
+        canonical_model_name("diffusion_models", requested_diffusion_model_name)
+        or requested_diffusion_model_name
+    )
+    clip_name = (
+        canonical_model_name("text_encoders", requested_clip_name)
+        or requested_clip_name
+    )
+    vae_name = canonical_model_name("vae", requested_vae_name) or requested_vae_name
     clip_type_name = str(gen_settings.get("clip_type", "stable_diffusion") or "stable_diffusion").lower()
 
     if not diffusion_model_name:

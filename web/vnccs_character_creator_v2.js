@@ -1291,6 +1291,18 @@ app.registerExtension({
                 const ANIMA_TURBO_LORA_NAME = "anima\\anima-turbo-lora-v0.1.safetensors";
                 const ANIMA_CLIP_NAME = "qwen_3_06b_base.safetensors";
                 const ANIMA_VAE_NAME = "qwen_image_vae.safetensors";
+
+                const canonicalAssetValue = (items, requested) => {
+                    const values = Array.isArray(items) ? items : [];
+                    const normalize = (value) => String(value || "").trim().replace(/\\/g, "/");
+                    const wanted = normalize(requested);
+                    if (!wanted) return "";
+                    const exact = values.find((value) => normalize(value) === wanted);
+                    if (exact) return exact;
+                    const basename = wanted.split("/").pop();
+                    const matches = values.filter((value) => normalize(value).split("/").pop() === basename);
+                    return matches.length === 1 ? matches[0] : requested;
+                };
                 const ILLUSTRIOUS_DEFAULTS = {
                     ckpt_name: "", sampler: "euler", scheduler: "normal",
                     steps: 20, cfg: 8.0, seed: 0, seed_mode: "fixed",
@@ -1870,8 +1882,7 @@ app.registerExtension({
                             }
                             if (parsed.preview_valid !== undefined) state.preview_valid = parsed.preview_valid;
 
-                            const overridden = applyStoredPrefs(true);
-                            console.log("[VNCCS V2] Loaded state from graph widget. Character:", state.character, overridden ? "(last active override)" : "");
+                            console.log("[VNCCS V2] Loaded state from graph widget. Character:", state.character);
                             return;
                         } catch (e) { console.error("Error loading widget data", e); }
                     }
@@ -3639,12 +3650,20 @@ app.registerExtension({
                         ["diffusion_model_name", "clip_name", "vae_name"].forEach((key) => {
                             const ref = els[key];
                             if (!ref) return;
-                            if (key === "clip_name" && !animaProfile[key]) {
-                                animaProfile[key] = ANIMA_CLIP_NAME;
-                            }
-                            if (key === "vae_name" && !animaProfile[key]) {
-                                animaProfile[key] = ANIMA_VAE_NAME;
-                            }
+                            const available = key === "diffusion_model_name"
+                                ? localAssets.diffusion_models
+                                : key === "clip_name"
+                                    ? localAssets.text_encoders
+                                    : localAssets.vae_models;
+                            const fallback = key === "clip_name"
+                                ? ANIMA_CLIP_NAME
+                                : key === "vae_name"
+                                    ? ANIMA_VAE_NAME
+                                    : "";
+                            animaProfile[key] = canonicalAssetValue(
+                                available,
+                                animaProfile[key] || fallback,
+                            );
                             if (key !== "diffusion_model_name" && !animaProfile[key] && ref.options.length > 0) {
                                 animaProfile[key] = ref.options[0].value;
                             }

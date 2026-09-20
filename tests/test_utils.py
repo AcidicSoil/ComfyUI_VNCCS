@@ -388,6 +388,136 @@ class TestPathHelpers:
         assert "happy" in path
 
 
+
+
+class _ResolverFolderPaths:
+    def __init__(self, roots_by_category, names_by_category):
+        self.roots_by_category = roots_by_category
+        self.names_by_category = names_by_category
+
+    def get_folder_paths(self, category):
+        return [str(path) for path in self.roots_by_category.get(category, [])]
+
+    def get_filename_list(self, category):
+        return list(self.names_by_category.get(category, []))
+
+    def get_full_path(self, category, name):
+        normalized = str(name).replace("\\", "/")
+        for root in self.roots_by_category.get(category, []):
+            candidate = root.joinpath(*[part for part in normalized.split("/") if part])
+            if candidate.exists():
+                return str(candidate)
+        return None
+
+
+def _install_resolver_folder_paths(monkeypatch, roots_by_category, names_by_category):
+    fake = _ResolverFolderPaths(roots_by_category, names_by_category)
+    monkeypatch.setitem(sys.modules, "folder_paths", fake)
+    return fake
+
+
+class TestCanonicalModelResolver:
+    def test_exact_canonical_name_resolves_under_primary_root(self, tmp_path, monkeypatch):
+        primary = tmp_path / "primary"
+        target = primary / "model.safetensors"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"x")
+        _install_resolver_folder_paths(
+            monkeypatch,
+            {"checkpoints": [primary]},
+            {"checkpoints": ["model.safetensors"]},
+        )
+
+        assert U.canonical_model_name("checkpoints", "model.safetensors") == "model.safetensors"
+        assert U.resolve_existing_model("checkpoints", "model.safetensors") == str(target)
+
+    def test_exact_canonical_name_resolves_when_only_extra_root_contains_file(self, tmp_path, monkeypatch):
+        primary = tmp_path / "primary"
+        extra = tmp_path / "extra"
+        target = extra / "anima" / "qwen_3_06b_base.safetensors"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"x")
+        _install_resolver_folder_paths(
+            monkeypatch,
+            {"text_encoders": [primary, extra]},
+            {"text_encoders": [r"anima\qwen_3_06b_base.safetensors"]},
+        )
+
+        assert U.canonical_model_name(
+            "text_encoders", "anima/qwen_3_06b_base.safetensors"
+        ) == r"anima\qwen_3_06b_base.safetensors"
+        assert U.resolve_existing_model(
+            "text_encoders", r"anima\qwen_3_06b_base.safetensors"
+        ) == str(target)
+
+    def test_unique_bare_basename_canonicalizes_to_nested_extra_path(self, tmp_path, monkeypatch):
+        extra = tmp_path / "extra"
+        target = extra / "anima" / "qwen_3_06b_base.safetensors"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"x")
+        _install_resolver_folder_paths(
+            monkeypatch,
+            {"text_encoders": [extra]},
+            {"text_encoders": [r"anima\qwen_3_06b_base.safetensors"]},
+        )
+
+        assert U.canonical_model_name(
+            "text_encoders", "qwen_3_06b_base.safetensors"
+        ) == r"anima\qwen_3_06b_base.safetensors"
+        assert U.model_is_installed("text_encoders", "qwen_3_06b_base.safetensors") is True
+
+    def test_duplicate_basename_is_explicitly_ambiguous(self, tmp_path, monkeypatch):
+        root = tmp_path / "models"
+        for subdir in ("one", "two"):
+            target = root / subdir / "shared.safetensors"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"x")
+        _install_resolver_folder_paths(
+            monkeypatch,
+            {"text_encoders": [root]},
+            {"text_encoders": [r"one\shared.safetensors", r"two\shared.safetensors"]},
+        )
+
+        with pytest.raises(U.ModelPathAmbiguityError, match="shared.safetensors"):
+            U.canonical_model_name("text_encoders", "shared.safetensors")
+
+    def test_missing_model_returns_missing(self, tmp_path, monkeypatch):
+        _install_resolver_folder_paths(
+            monkeypatch,
+            {"vae": [tmp_path / "vae"]},
+            {"vae": []},
+        )
+
+        assert U.resolve_existing_model("vae", "missing.safetensors") is None
+        assert U.model_is_installed("vae", "missing.safetensors") is False
+
+    @pytest.mark.parametrize(
+        ("category", "nested_name"),
+        [
+            ("loras", r"anima\pose.safetensors"),
+            ("vae", r"anima\qwen_image_vae.safetensors"),
+            ("diffusion_models", r"anima\anima-base-v1.0.safetensors"),
+            ("controlnet", r"pose\control.safetensors"),
+            ("model_patches", r"patches\patch.safetensors"),
+        ],
+    )
+    def test_extra_root_resolution_across_model_categories(
+        self, tmp_path, monkeypatch, category, nested_name
+    ):
+        root = tmp_path / category
+        target = root.joinpath(*nested_name.replace("\\", "/").split("/"))
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"x")
+        _install_resolver_folder_paths(
+            monkeypatch,
+            {category: [root]},
+            {category: [nested_name]},
+        )
+
+        basename = nested_name.replace("\\", "/").rsplit("/", 1)[-1]
+        assert U.resolve_existing_model(category, basename) == str(target)
+
+
 # ── load_config / save_config ─────────────────────────────────────────────────
 
 class TestConfigIO:

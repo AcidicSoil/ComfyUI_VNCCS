@@ -78,11 +78,80 @@ def _model_path_variants(name: str) -> List[str]:
     return variants
 
 
+class ModelPathAmbiguityError(ValueError):
+    """Raised when a bare model basename matches multiple canonical ComfyUI names."""
+
+
+def _get_folder_paths_module():
+    import folder_paths
+    return folder_paths
+
+
+def _normalize_model_identifier(value: str) -> str:
+    return str(value or "").strip().replace("\\", "/").strip("/")
+
+
 def _safe_get_model_folder_paths(folder_paths, category: str) -> List[str]:
     try:
         return folder_paths.get_folder_paths(category) or []
     except Exception:
         return []
+
+
+def _safe_get_model_filename_list(folder_paths, category: str) -> List[str]:
+    try:
+        return list(folder_paths.get_filename_list(category) or [])
+    except Exception:
+        return []
+
+
+def _canonical_model_name(folder_paths, category: str, requested: str):
+    requested_normalized = _normalize_model_identifier(requested)
+    if not requested_normalized:
+        return None
+
+    available = _safe_get_model_filename_list(folder_paths, category)
+
+    exact_matches = [
+        name for name in available
+        if _normalize_model_identifier(name) == requested_normalized
+    ]
+    if exact_matches:
+        return exact_matches[0]
+
+    for candidate in _model_path_variants(requested):
+        try:
+            found = folder_paths.get_full_path(category, candidate)
+        except Exception:
+            found = None
+        if found and os.path.exists(found):
+            return str(requested).strip()
+
+    for folder in _safe_get_model_folder_paths(folder_paths, category):
+        candidate = os.path.join(folder, normalize_filesystem_path(requested))
+        if os.path.exists(candidate):
+            return str(requested).strip()
+
+    requested_basename = requested_normalized.rsplit("/", 1)[-1]
+    basename_matches = [
+        name for name in available
+        if _normalize_model_identifier(name).rsplit("/", 1)[-1] == requested_basename
+    ]
+    if len(basename_matches) == 1:
+        return basename_matches[0]
+    if len(basename_matches) > 1:
+        rendered = ", ".join(repr(name) for name in basename_matches)
+        raise ModelPathAmbiguityError(
+            f"Model basename '{requested_basename}' is ambiguous for category "
+            f"'{category}': {rendered}"
+        )
+
+    return None
+
+
+def canonical_model_name(category: str, requested: str):
+    """Return the canonical ComfyUI registry name for a requested model identifier."""
+    return _canonical_model_name(_get_folder_paths_module(), category, requested)
 
 
 def _is_under_any_model_folder(path: str, folders: List[str]) -> bool:
@@ -97,12 +166,16 @@ def _is_under_any_model_folder(path: str, folders: List[str]) -> bool:
     return False
 
 
-def get_full_path_agnostic(folder_paths, category: str, name: str, require_exists: bool = False):
-    """Find a ComfyUI model path regardless of slash style or host OS."""
+def _resolve_existing_model(folder_paths, category: str, requested: str, require_exists: bool = True):
+    canonical = _canonical_model_name(folder_paths, category, requested)
+    candidate_name = canonical or str(requested or "").strip()
+    if not candidate_name:
+        return None
+
     folders = _safe_get_model_folder_paths(folder_paths, category)
     first_match = None
 
-    for candidate in _model_path_variants(name):
+    for candidate in _model_path_variants(candidate_name):
         try:
             found = folder_paths.get_full_path(category, candidate)
         except Exception:
@@ -128,6 +201,31 @@ def get_full_path_agnostic(folder_paths, category: str, name: str, require_exist
                 first_match = normalized_candidate
 
     return None if require_exists else first_match
+
+
+def resolve_existing_model(category: str, requested: str, require_exists: bool = True):
+    """Resolve an installed model across every ComfyUI folder registered for a category."""
+    return _resolve_existing_model(
+        _get_folder_paths_module(),
+        category,
+        requested,
+        require_exists=require_exists,
+    )
+
+
+def model_is_installed(category: str, requested: str) -> bool:
+    """Return whether a requested model resolves to an existing registered ComfyUI asset."""
+    return resolve_existing_model(category, requested, require_exists=True) is not None
+
+
+def get_full_path_agnostic(folder_paths, category: str, name: str, require_exists: bool = False):
+    """Backward-compatible wrapper around canonical ComfyUI model resolution."""
+    return _resolve_existing_model(
+        folder_paths,
+        category,
+        name,
+        require_exists=require_exists,
+    )
 
 
 def basename_agnostic(path: str) -> str:

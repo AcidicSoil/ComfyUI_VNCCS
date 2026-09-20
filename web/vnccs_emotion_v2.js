@@ -1153,6 +1153,18 @@ app.registerExtension({
                 const ANIMA_TURBO_LORA_NAME = "anima\\anima-turbo-lora-v0.1.safetensors";
                 const ANIMA_CLIP_NAME = "qwen_3_06b_base.safetensors";
                 const ANIMA_VAE_NAME = "qwen_image_vae.safetensors";
+
+                const canonicalAssetValue = (items, requested) => {
+                    const values = Array.isArray(items) ? items : [];
+                    const normalize = (value) => String(value || "").trim().replace(/\\/g, "/");
+                    const wanted = normalize(requested);
+                    if (!wanted) return "";
+                    const exact = values.find((value) => normalize(value) === wanted);
+                    if (exact) return exact;
+                    const basename = wanted.split("/").pop();
+                    const matches = values.filter((value) => normalize(value).split("/").pop() === basename);
+                    return matches.length === 1 ? matches[0] : requested;
+                };
                 const promptStyleForMode = (mode) => String(mode || "anima").toLowerCase() === "anima" ? "Anima" : "SDXL Style";
                 const initialSharedSeed = 0;
                 const GENERATION_DEFAULTS = {
@@ -2003,13 +2015,18 @@ app.registerExtension({
                         (generationEls.loraSelects || []).forEach(select => populateSelect(select, data.loras || [], true));
 
                         if (!state.gen.ckpt_name && data.checkpoints?.length) state.gen.ckpt_name = data.checkpoints[0];
-                        if (!state.gen.diffusion_model_name && data.diffusion_models?.length) state.gen.diffusion_model_name = data.diffusion_models[0];
-                        if (!state.gen.clip_name) {
-                            state.gen.clip_name = (data.text_encoders || []).includes(ANIMA_CLIP_NAME) ? ANIMA_CLIP_NAME : (data.text_encoders?.[0] || ANIMA_CLIP_NAME);
-                        }
-                        if (!state.gen.vae_name) {
-                            state.gen.vae_name = (data.vae_models || []).includes(ANIMA_VAE_NAME) ? ANIMA_VAE_NAME : (data.vae_models?.[0] || ANIMA_VAE_NAME);
-                        }
+                        state.gen.diffusion_model_name = canonicalAssetValue(
+                            data.diffusion_models,
+                            state.gen.diffusion_model_name,
+                        ) || (data.diffusion_models?.[0] || state.gen.diffusion_model_name);
+                        state.gen.clip_name = canonicalAssetValue(
+                            data.text_encoders,
+                            state.gen.clip_name || ANIMA_CLIP_NAME,
+                        ) || (data.text_encoders?.[0] || ANIMA_CLIP_NAME);
+                        state.gen.vae_name = canonicalAssetValue(
+                            data.vae_models,
+                            state.gen.vae_name || ANIMA_VAE_NAME,
+                        ) || (data.vae_models?.[0] || ANIMA_VAE_NAME);
                         syncGenerationControls();
                         saveGenerationSettings();
                         try {

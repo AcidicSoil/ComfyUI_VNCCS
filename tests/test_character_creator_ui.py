@@ -16,3 +16,10 @@ def test_anima_resolution_selector_is_mode_scoped_and_persisted():
     assert 'els.animaResolutionWrap.style.display = isAnima ? "flex" : "none"' in SOURCE
     assert 'anima: ["diffusion_model_name", "clip_name", "vae_name", "resolution_preset"' in SOURCE
     assert 'resolution_preset: "normal"' in SOURCE
+
+
+def test_model_selection_canonicalizes_unique_nested_registry_names():
+    assert 'const canonicalAssetValue = (items, requested) =>' in SOURCE
+    assert 'animaProfile[key] = canonicalAssetValue(' in SOURCE
+    assert 'localAssets.text_encoders' in SOURCE
+    assert 'localAssets.vae_models' in SOURCE

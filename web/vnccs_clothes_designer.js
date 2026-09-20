@@ -1817,7 +1817,6 @@ app.registerExtension({
                     const d = await r.json();
                     setClothesCoreLora();
                     syncGenerationControls();
-                    saveState(); // Ensure defaults are persisted immediately
 
                     // Char List
                     els.charSelect.innerHTML = "";
@@ -1934,6 +1933,54 @@ app.registerExtension({
                     }
                 };
 
+                node._vnccsClothesRehydrate = async (configureInfo = null) => {
+                    const configuredValue = configureInfo?.widgets_values?.[0];
+                    if (typeof configuredValue === "string" && configuredValue && configuredValue !== "{}") {
+                        dataWidget.value = configuredValue;
+                    }
+                    if (!dataWidget?.value || dataWidget.value === "{}") return false;
+                    let parsed;
+                    try {
+                        parsed = JSON.parse(dataWidget.value);
+                    } catch (e) {
+                        console.warn("[VNCCS] ClothesDesigner: Failed to rehydrate saved workflow state", e);
+                        return false;
+                    }
+
+                    if (parsed.character !== undefined) state.character = parsed.character;
+                    if (parsed.costume !== undefined) state.costume = parsed.costume;
+                    if (parsed.activeTab !== undefined) state.activeTab = parsed.activeTab;
+                    if (parsed.selected_preview_sprite !== undefined) {
+                        state.selected_preview_sprite = parsed.selected_preview_sprite;
+                    }
+                    if (parsed.costume_info) {
+                        state.costume_info = { ...state.costume_info, ...parsed.costume_info };
+                    }
+                    if (parsed.character_info) {
+                        state.character_info = { ...state.character_info, ...parsed.character_info };
+                    }
+                    if (parsed.gen_settings) {
+                        state.gen_settings = { ...state.gen_settings, ...parsed.gen_settings };
+                    }
+
+                    if (els.charSelect && state.character) {
+                        const exists = Array.from(els.charSelect.options).some(
+                            option => option.value === state.character
+                        );
+                        if (!exists) els.charSelect.add(new Option(state.character, state.character));
+                        els.charSelect.value = state.character;
+                    }
+
+                    syncGenerationControls();
+                    await loadCharacterInfo();
+                    await loadCostumes();
+                    syncCostumeEditControls();
+                    saveState();
+                    await updatePreviewImage(true);
+                    applyPoseStudioValues({ force: true });
+                    return true;
+                };
+
                 const onPreviewUpdated = (event) => {
                     const targetId = String(event.detail?.node_id);
                     const myId = String(node.id);
@@ -1966,7 +2013,10 @@ app.registerExtension({
             nodeType.prototype.onConfigure = function (info) {
                 onConfigure?.apply(this, arguments);
                 syncDOMWidgetWidth(this, "clothes_designer_ui");
-                setTimeout(() => syncDOMWidgetWidth(this, "clothes_designer_ui"), 100);
+                setTimeout(() => {
+                    syncDOMWidgetWidth(this, "clothes_designer_ui");
+                    this._vnccsClothesRehydrate?.(info);
+                }, 100);
             };
         }
     }

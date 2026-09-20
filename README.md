@@ -44,6 +44,8 @@ Click "Install missing custom nodes"
 
 ## VNCCS 3.0 Workflow
 
+For a concise operational runbook covering startup, model selection, Pose Studio browser requirements, the Creator → Clothes → Emotions pipeline, output locations, verification, and failure recovery, see [VNCCS Generation Playbook](docs/VNCCS_GENERATION_PLAYBOOK.md).
+
 Hi! My name is V-chan, and I am going to show you how to use the new VNCCS!
 
 We got a BIIIIIIG update, and now everything is completely new, so listen carefully!
@@ -65,6 +67,8 @@ Let's start from the very beginning. The first thing you need to do, besides ope
 ![Header](images/v3/ReadMe1.png)
 
 Inside it, you will find all the models used in the workflow. Choose the one that fits your computer and press **Download**.
+
+VNCCS uses ComfyUI's registered model inventory, including folders configured through `extra_model_paths.yaml`. Existing models in those folders are reused instead of copied or downloaded again. Nested ComfyUI names such as `anima\qwen_3_06b_base.safetensors` are preserved when a model is selected. If the same basename exists in more than one registered location, select the full nested name instead of relying on the basename.
 
 - **Q4** is light, but in some places the result may be a little less fancy.
 - **Q5** is a great balance between quality and performance.

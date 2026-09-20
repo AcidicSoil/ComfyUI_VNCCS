@@ -112,6 +112,8 @@ Runs are convergent. If base, poses, an outfit, or requested emotion artifacts a
 
 To keep the generated workflows for later manual editing/reuse, enable **Save reusable Creator, Clothes, and Emotions workflows to my ComfyUI user workflows** in Character Studio Production or run with `--save-user-workflows`. The runner saves normal UI workflows under `C:\Users\user\Documents\ComfyUI\user\default\workflows\VNCCS\Saved Runs\<character>\<run-id>\`, preserving the run's character, poses, costume settings, and requested emotions. These files must reopen directly in ComfyUI without relying on agent state or the last active browser character.
 
+Saved user workflows are permanent until the user deletes them manually. Character Studio may prune completed temporary data under `/tmp/vnccs-discovery/` and `/tmp/vnccs-fullchain/` only when the user presses the Production cleanup button. Cleanup must never delete anything under the ComfyUI user workflow tree and must preserve active/current runs.
+
 In this mode, the generation agent must:
 
 1. Run Character Creator or Character Cloner according to the request.

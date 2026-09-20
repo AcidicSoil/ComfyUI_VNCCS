@@ -41,6 +41,7 @@ from nodes.vnccs_control_center import (
     _get_manager_install_policy,
     _manager_config_path,
     VNCCSPipeProxy,
+    cc_check,
 )
 
 _CONTROL_CENTER_MODULE = sys.modules[_sync_packaged_cc_config.__module__]
@@ -1317,3 +1318,31 @@ class TestLocalModelInventory:
             "kind": "Klein9b",
             "local_path": "models/diffusion_models/flux-2-klein-9b-fp8.safetensors",
         }]
+
+
+class TestControlCenterCheckRoute:
+    def test_normal_check_uses_packaged_cache_and_force_refresh_uses_remote(self, monkeypatch):
+        import asyncio
+
+        calls = []
+        config = {"name": "VNCCS", "models": [], "clip": [], "vae": [], "lora": [], "controlnet": [], "other": []}
+        monkeypatch.setattr(_CONTROL_CENTER_MODULE, "_get_cc_config", lambda repo_id, prefer_remote=False: calls.append((repo_id, prefer_remote)) or config)
+        monkeypatch.setattr(_CONTROL_CENTER_MODULE, "get_installed_version_info", lambda: {})
+        monkeypatch.setattr(_CONTROL_CENTER_MODULE, "_get_cc_config_source", lambda _repo_id: "packaged")
+        class Response:
+            def __init__(self, payload, status=200):
+                self.payload = payload
+                self.status = status
+        monkeypatch.setattr(_CONTROL_CENTER_MODULE.web, "json_response", lambda payload, status=200: Response(payload, status), raising=False)
+
+        class Request:
+            def __init__(self, query):
+                self.rel_url = type("Rel", (), {"query": query})()
+
+        response = asyncio.run(cc_check(Request({"repo_id": "MIUProject/VNCCS_v3.0"})))
+        assert response.status == 200
+        assert calls[-1] == ("MIUProject/VNCCS_v3.0", False)
+
+        response = asyncio.run(cc_check(Request({"repo_id": "MIUProject/VNCCS_v3.0", "force_refresh": "true"})))
+        assert response.status == 200
+        assert calls[-1] == ("MIUProject/VNCCS_v3.0", True)

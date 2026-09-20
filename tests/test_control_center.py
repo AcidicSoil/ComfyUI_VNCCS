@@ -26,6 +26,9 @@ from nodes.vnccs_control_center import (
     _build_dynamic_paths,
     _build_custom_lora_name,
     _dedupe_config_by_name,
+    _local_model_family,
+    _local_model_entries,
+    _merge_local_model_inventory,
     _enrich_config_entries,
     _merge_custom_loras,
     _remove_custom_lora,
@@ -1233,3 +1236,81 @@ class TestGGUFLoaderDiagnostics:
 
         with pytest.raises(RuntimeError, match="does not support Qwen Image GGUF"):
             _load_gguf("/tmp/Qwen-Image.gguf")
+
+
+class TestLocalModelInventory:
+    def test_classifies_supported_local_model_families(self):
+        assert _local_model_family("klein-2-9b/msFlux2Klein9B_v5.safetensors", "unet") == ("Klein9b", "unet")
+        assert _local_model_family("qwen/qwen-image-edit-2511-local.gguf", "unet") == ("QIE2511", "gguf")
+        assert _local_model_family("Anima/anima-custom.safetensors", "unet") == ("Anima", "unet")
+        assert _local_model_family("Illustrious/customMix.safetensors", "checkpoint") == ("Illustrious", "checkpoint")
+        assert _local_model_family("flux/random-flux.safetensors", "unet") is None
+
+    def test_discovers_models_from_registered_extra_paths(self, monkeypatch, tmp_path):
+        files = {
+            "diffusion_models": [
+                "klein-2-9b/msFlux2Klein9B_v5.safetensors",
+                "misc/unrelated.safetensors",
+            ],
+            "unet": ["klein-2-9b/msFlux2Klein9B_v5.safetensors"],
+            "checkpoints": ["Illustrious/localMix.safetensors"],
+        }
+        roots = {key: tmp_path / key for key in files}
+        for key, values in files.items():
+            for value in values:
+                target = roots[key] / value
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(b"model")
+
+        monkeypatch.setattr(_CONTROL_CENTER_MODULE.folder_paths, "get_filename_list", lambda key: files.get(key, []))
+        monkeypatch.setattr(
+            _CONTROL_CENTER_MODULE,
+            "get_full_path_agnostic",
+            lambda _fp, key, rel, require_exists=False: str(roots[key] / rel) if (roots[key] / rel).exists() else None,
+        )
+        monkeypatch.setattr(_CONTROL_CENTER_MODULE.folder_paths, "get_folder_paths", lambda key: [str(roots[key])] if key in roots else [])
+
+        entries = _local_model_entries()
+        assert {(entry["kind"], entry["type"], entry["name"]) for entry in entries} == {
+            ("Klein9b", "unet", "klein-2-9b/msFlux2Klein9B_v5.safetensors"),
+            ("Illustrious", "checkpoint", "Illustrious/localMix.safetensors"),
+        }
+        assert all(entry["source"] == "local" and entry["local"] is True for entry in entries)
+
+    def test_merge_keeps_catalog_authoritative_and_adds_local_variants(self, monkeypatch):
+        catalog = {
+            "models": [{
+                "name": "Flux Klein 9B FP8",
+                "type": "unet",
+                "kind": "Klein9b",
+                "local_path": "models/diffusion_models/flux-2-klein-9b-fp8.safetensors",
+            }],
+            "clip": [], "vae": [], "lora": [], "controlnet": [], "other": [],
+        }
+        monkeypatch.setattr(_CONTROL_CENTER_MODULE, "_local_model_entries", lambda: [
+            {
+                "name": "flux-2-klein-9b-fp8.safetensors",
+                "type": "unet", "kind": "Klein9b",
+                "local_path": "models/diffusion_models/flux-2-klein-9b-fp8.safetensors",
+                "source": "local", "local": True,
+            },
+            {
+                "name": "klein-2-9b/msFlux2Klein9B_v5.safetensors",
+                "type": "unet", "kind": "Klein9b",
+                "local_path": "models/diffusion_models/klein-2-9b/msFlux2Klein9B_v5.safetensors",
+                "source": "local", "local": True,
+            },
+        ])
+        monkeypatch.setattr(_CONTROL_CENTER_MODULE, "_find_model_on_disk", lambda path: (path, True))
+
+        merged = _merge_local_model_inventory(catalog)
+        assert [entry["name"] for entry in merged["models"]] == [
+            "Flux Klein 9B FP8",
+            "klein-2-9b/msFlux2Klein9B_v5.safetensors",
+        ]
+        assert catalog["models"] == [{
+            "name": "Flux Klein 9B FP8",
+            "type": "unet",
+            "kind": "Klein9b",
+            "local_path": "models/diffusion_models/flux-2-klein-9b-fp8.safetensors",
+        }]

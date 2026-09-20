@@ -757,7 +757,7 @@ def _get_cc_config(repo_id, prefer_remote=False):
     cached = _CC_CONFIG_CACHE.get(repo_id)
     now = time.time()
     if not prefer_remote and cached and now - cached.get("ts", 0) < 300:
-        return _dedupe_config_by_name(_merge_custom_loras(cached["data"]))
+        return _merge_local_model_inventory(_dedupe_config_by_name(_merge_custom_loras(cached["data"])))
 
     source = "packaged"
     if _uses_packaged_cc_config(repo_id) and not prefer_remote:
@@ -776,7 +776,7 @@ def _get_cc_config(repo_id, prefer_remote=False):
     if source == "huggingface":
         _sync_packaged_cc_config(repo_id, data)
     _CC_CONFIG_CACHE[repo_id] = {"ts": now, "data": data, "source": source}
-    return _dedupe_config_by_name(_merge_custom_loras(data))
+    return _merge_local_model_inventory(_dedupe_config_by_name(_merge_custom_loras(data)))
 
 
 def _get_cc_config_source(repo_id):
@@ -831,6 +831,103 @@ def _dedupe_config_by_name(config):
     result = dict(config)
     for category in ("models", "clip", "vae", "lora", "controlnet", "other"):
         result[category] = _dedupe_entries_by_name(config.get(category, []))
+    return result
+
+
+_LOCAL_MODEL_SOURCES = (
+    ("diffusion_models", "unet"),
+    ("unet", "unet"),
+    ("checkpoints", "checkpoint"),
+)
+
+
+def _local_model_family(rel_path, default_type):
+    """Classify only model families VNCCS already knows how to load."""
+    normalized = str(rel_path or "").replace("\\", "/").strip("/")
+    identity = normalized.lower()
+    if not normalized:
+        return None
+    ext = os.path.splitext(identity)[1]
+    model_type = "gguf" if ext == ".gguf" else default_type
+    if "klein" in identity:
+        return "Klein9b", model_type
+    if "anima" in identity:
+        return "Anima", model_type
+    if "2511" in identity and ("qwen" in identity or "qie" in identity):
+        return "QIE2511", model_type
+    if default_type == "checkpoint" and "illustrious" in identity:
+        return "Illustrious", "checkpoint"
+    return None
+
+
+def _local_model_entries():
+    """Discover compatible models through ComfyUI's registered model folders."""
+    entries = []
+    seen_paths = set()
+    for folder_key, default_type in _LOCAL_MODEL_SOURCES:
+        try:
+            filenames = folder_paths.get_filename_list(folder_key) or []
+        except Exception as exc:
+            print(f"[VNCCS Control Center] folder_paths.get_filename_list failed for {folder_key}: {exc}")
+            continue
+        for value in filenames:
+            rel_path = str(value or "").replace("\\", "/").strip("/")
+            family = _local_model_family(rel_path, default_type)
+            if family is None:
+                continue
+            try:
+                _validate_model_filename(rel_path)
+            except ValueError:
+                continue
+            kind, model_type = family
+            # Resolve through ComfyUI so aliases such as unet/diffusion_models and
+            # extra_model_paths collapse to one physical model when possible.
+            full_path = get_full_path_agnostic(folder_paths, folder_key, rel_path, require_exists=True)
+            identity = os.path.normcase(os.path.abspath(full_path)) if full_path else f"{folder_key}:{rel_path.lower()}"
+            if identity in seen_paths:
+                continue
+            seen_paths.add(identity)
+            entries.append({
+                "name": rel_path,
+                "type": model_type,
+                "kind": kind,
+                "local_path": f"models/{folder_key}/{rel_path}",
+                "description": f"Local {kind} model discovered from ComfyUI '{folder_key}'.",
+                "source": "local",
+                "local": True,
+            })
+    return entries
+
+
+def _merge_local_model_inventory(config):
+    """Merge compatible local models without mutating the cached catalog."""
+    if not isinstance(config, dict):
+        return config
+    result = dict(config)
+    catalog_models = [dict(entry) for entry in config.get("models", []) if isinstance(entry, dict)]
+    known_paths = {
+        str(entry.get("local_path") or "").replace("\\", "/").lower()
+        for entry in catalog_models
+        if entry.get("local_path")
+    }
+    known_full_paths = set()
+    for entry in catalog_models:
+        full_path, exists = _find_model_on_disk(entry.get("local_path", ""))
+        if exists and full_path:
+            known_full_paths.add(os.path.normcase(os.path.abspath(full_path)))
+
+    for entry in _local_model_entries():
+        local_path = str(entry.get("local_path") or "").replace("\\", "/")
+        full_path, exists = _find_model_on_disk(local_path)
+        normalized_full = os.path.normcase(os.path.abspath(full_path)) if exists and full_path else ""
+        if local_path.lower() in known_paths or (normalized_full and normalized_full in known_full_paths):
+            continue
+        catalog_models.append(entry)
+        known_paths.add(local_path.lower())
+        if normalized_full:
+            known_full_paths.add(normalized_full)
+
+    result["models"] = _dedupe_entries_by_name(catalog_models)
     return result
 
 

@@ -97,6 +97,19 @@ Permanent identity includes hair, eyes, skin/face details, build/silhouette, fan
 
 Use end-to-end mode when the request says full process, complete pipeline, full chain, start to finish, or comes from the VNCCS generation wizard with `mode: end-to-end`.
 
+For a Character Studio or terminal-wizard JSON brief, the primary executable path is:
+
+```bash
+/home/user/.agents/skills/vnccs-workflows/scripts/run_fullchain.py \
+  --job /tmp/<timestamp>-<character>.json
+```
+
+Character Studio exposes the same runner as **Run full VNCCS chain** in Production.
+
+The runner uses committed Creator, Clothes, and Emotions templates. It owns the headed `comfyui-vnccs` Pose Studio capture step, registers requested costumes, submits the proven API workflow shapes to ComfyUI, requires successful prompt history, verifies expected files, and writes `state.json` plus `RUN_REPORT.md` under `/tmp/vnccs-fullchain/<run-id>/`.
+
+Runs are convergent. If base, poses, an outfit, or requested emotion artifacts already exist and verify correctly, the runner skips that completed stage unless `--force` is supplied. Restart the same JSON brief after an interruption instead of rebuilding state manually.
+
 In this mode, the generation agent must:
 
 1. Run Character Creator or Character Cloner according to the request.

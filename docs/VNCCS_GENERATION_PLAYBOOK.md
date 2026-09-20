@@ -83,7 +83,9 @@ The studio:
 - analyzes the selected rendered take with WD EVA02 v3;
 - applies a deterministic permanent-identity whitelist/denylist locally so clothing, underwear, pose, expression, background, injury/state, and similar transient tags are not baked into base identity;
 - falls back to the deterministic candidate metadata only for permanent fields the rendered-image tagger did not resolve;
-- collects poses/outfits/emotions and writes the authoritative `/tmp/<timestamp>-<character>.md` + `.json` brief for end-to-end execution.
+- collects poses/outfits/emotions and writes the authoritative `/tmp/<timestamp>-<character>.md` + `.json` brief for end-to-end execution;
+- exposes a curated set of real installed-workflow controls for generation mode, installed checkpoint or Anima diffusion/text-encoder/VAE selection, Anima Turbo, resolution, live sampler/scheduler choices, steps/CFG/seed behavior, Creator background and prompts, Pose Studio body/camera values, Clothes Designer garment fields, Emotion face-detail controls, and output upscaling;
+- writes those controls under `workflow_options` in the structured brief so the runner and saved reusable workflows use the same settings rather than reverting to template defaults.
 
 If the studio is unavailable or a non-visual/terminal workflow is explicitly preferred, fall back to the helper/contact-sheet path.
 

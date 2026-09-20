@@ -7,7 +7,7 @@ Use it when creating a new character, cloning an existing character, generating 
 ## 1. Runtime prerequisites
 
 - Start ComfyUI Desktop and wait until the ComfyUI frontend is fully loaded.
-- Local endpoint: `http://127.0.0.1:8188`.
+- Do not assume port `8188`. Character Studio resolves the active local ComfyUI endpoint and exports it as `VNCCS_COMFY_URL`; an explicit `VNCCS_COMFY_URL` override wins. On 2026-09-20 the active Desktop instance is `http://127.0.0.1:8001` and runs with Manager enabled.
 - Keep the ComfyUI frontend open for any workflow that contains **VNCCS Pose Studio**.
 - Pose Studio renders images in the browser with WebGL and uploads them to the backend during execution.
 - A backend-only/API run can fail with `Pose Studio did not receive images rendered by the browser widget` if no live frontend capture is available.
@@ -76,15 +76,15 @@ For visual samples, use the production **VNCCS Character Studio** as the primary
 The studio:
 - collects broad human constraints rather than raw tags, including explicit sex (`Female` / `Male` / `Surprise me`) separately from presentation;
 - generates deterministic candidate identities from the installed Portrait Master vocabulary;
-- renders numbered previews through the real VNCCS `/vnccs/preview_generate` Anima path;
+- renders numbered previews through the real VNCCS `/vnccs/preview_generate` path using the same selected generation engine/model/sampler/CFG/LoRA/character settings that Production will execute;
 - keeps comparison pose/expression/background/transient clothing neutral;
-- saves discovery state/images under `/tmp/vnccs-discovery/<run-id>/`;
+- keeps active discovery working state under `/tmp/vnccs-discovery/<run-id>/` and copies completed casting images/state durably to `output/VNCCS/CharacterDiscovery/<run-id>/`;
 - lets the user select one take or reroll;
 - analyzes the selected rendered take with WD EVA02 v3;
 - applies a deterministic permanent-identity whitelist/denylist locally so clothing, underwear, pose, expression, background, injury/state, and similar transient tags are not baked into base identity;
 - falls back to the deterministic candidate metadata only for permanent fields the rendered-image tagger did not resolve;
 - collects poses/outfits/emotions and writes the authoritative `/tmp/<timestamp>-<character>.md` + `.json` brief for end-to-end execution;
-- exposes a curated set of real installed-workflow controls for generation mode, installed checkpoint or Anima diffusion/text-encoder/VAE selection, Anima Turbo, resolution, live sampler/scheduler choices, steps/CFG/seed behavior, Creator background/NSFW mode/prompts, Pose Studio body/camera values, Clothes Designer garment fields, Emotion face-detail controls, and output upscaling;
+- exposes real installed-workflow controls for generation/model/encoder/VAE selection, DMD/Age/five-slot LoRAs, Anima Turbo, resolution/sampler/scheduler/steps/CFG/seed behavior, Creator background/NSFW/prompts, full Pose Studio anatomy/camera/view/lighting, Clothes LoRA and garment fields, Emotion detector/SAM/device/detailer/inpaint settings, chroma/SAM3 detail recovery, and SeedVR seed/batching/noise/attention/tile/cache output settings;
 - writes those controls under `workflow_options` in the structured brief so the runner and saved reusable workflows use the same settings rather than reverting to template defaults.
 
 If the studio is unavailable or a non-visual/terminal workflow is explicitly preferred, fall back to the helper/contact-sheet path.
@@ -108,13 +108,15 @@ For a Character Studio or terminal-wizard JSON brief, the primary executable pat
 
 Character Studio exposes the same runner as **Run full VNCCS chain** in Production.
 
-The runner uses committed Creator, Clothes, and Emotions templates. It owns the headed `comfyui-vnccs` Pose Studio capture step, registers requested costumes, submits the proven API workflow shapes to ComfyUI, requires successful prompt history, verifies expected files, and writes `state.json` plus `RUN_REPORT.md` under `/tmp/vnccs-fullchain/<run-id>/`.
+The runner uses committed Creator, Clothes, and Emotions templates. It owns the headed `comfyui-vnccs` Pose Studio capture step, registers requested costumes, submits the proven API workflow shapes to ComfyUI, requires successful prompt history, verifies versioned outputs, creates contact sheets, and writes transient state under `/tmp/vnccs-fullchain/<execution-id>/`. It also archives `job.json`, `state.json`, and `RUN_REPORT.md` durably under `output/VNCCS/RunHistory/<character>/<run-id>/`.
 
-Runs are convergent. If base, poses, an outfit, or requested emotion artifacts already exist and verify correctly, the runner skips that completed stage unless `--force` is supplied. Restart the same JSON brief after an interruption instead of rebuilding state manually.
+For multi-pose generation, the runner resolves default poses from installed Pose Studio library assets and copies their actual skeletal state into the Creator workflow. Pose prompts remain separate text instructions. Do not create pose variants by cloning one pose and changing only `prompt`; that produces duplicate browser captures. The runner rejects duplicate skeletal states. A structured job may override defaults with `poses.assets`, where each entry identifies a Pose Studio asset by `name`, `category`, and optional `repository`.
+
+Runs are convergent. If base, poses, an outfit, or requested emotion artifacts already exist and verify correctly, the runner skips that completed stage unless forced. Use `--force` for the whole run or repeat `--force-stage` with `base`, `poses`, `clothes:<outfit>`, or `emotions:<outfit>`. Upstream force requests include dependent downstream stages automatically. Character Studio exposes the same policy through Production's **Regenerate existing outputs** and Library's per-stage buttons. Restart the same JSON brief after an interruption instead of rebuilding state manually.
 
 To keep the generated workflows for later manual editing/reuse, enable **Save reusable Creator, Clothes, and Emotions workflows to my ComfyUI user workflows** in Character Studio Production or run with `--save-user-workflows`. The runner saves normal UI workflows under `C:\Users\user\Documents\ComfyUI\user\default\workflows\VNCCS\Saved Runs\<character>\<run-id>\`, preserving the run's character, poses, costume settings, and requested emotions. These files must reopen directly in ComfyUI without relying on agent state or the last active browser character.
 
-Saved user workflows are permanent until the user deletes them manually. Character Studio may prune completed temporary data under `/tmp/vnccs-discovery/` and `/tmp/vnccs-fullchain/` only when the user presses the Production cleanup button. Cleanup must never delete anything under the ComfyUI user workflow tree and must preserve active/current runs.
+Saved user workflows are permanent until the user deletes them manually. Generated character assets/sheets, `output/VNCCS/CharacterDiscovery`, and `output/VNCCS/RunHistory` are also durable. Character Studio may prune only completed working data under `/tmp/vnccs-discovery/` and `/tmp/vnccs-fullchain/` when the user presses the Production cleanup button. Cleanup must preserve active/current runs and must never delete durable output/history/workflow trees.
 
 In this mode, the generation agent must:
 
@@ -128,6 +130,12 @@ In this mode, the generation agent must:
 8. Finish by reporting the stages executed, models actually used, output counts, and exact output directories.
 
 Wizard-generated choices are already-resolved requirements. Do not ask the user to repeat choices present in the brief.
+
+### Character Studio Output Library
+
+Use Character Studio's **Library** to inspect durable outputs after generation. The catalog is derived from the filesystem, not a separate database. It includes character sprites/faces/sheets, durable discovery takes, durable run records, and saved reusable workflows. Use Library actions to open output/report/workflow folders, view reports, load a saved workflow into the managed ComfyUI tab, or regenerate an entire archived run or one stage from its durable `job.json`.
+
+Pruning `/tmp` must not remove anything required by Library regeneration.
 
 ### Character Creator
 
@@ -190,6 +198,9 @@ Important locations:
 - Character config: `<CharacterName>_config.json`
 - Preview image: `cache\preview.png`
 - Costume preview: `cache\preview_<CostumeName>.png`
+- Contact sheets: `Sheets\Naked\Neutral\sheet_neutral.png` and `Sheets\<CostumeName>\Contact\sheet_contact.png`
+- Durable casting archive: `..\..\CharacterDiscovery\<run-id>\`
+- Durable full-chain history: `..\..\RunHistory\<character>\<run-id>\`
 - Per-run/intermediate pose stages: `cache\poses\<node-id>\`
 
 Inside a pose cache directory, common artifacts include:

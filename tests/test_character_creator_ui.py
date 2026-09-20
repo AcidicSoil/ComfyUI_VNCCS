@@ -1,7 +1,7 @@
 from pathlib import Path
 
 
-SOURCE = (Path(__file__).parents[1] / "web" / "vnccs_character_creator_v2.js").read_text()
+SOURCE = (Path(__file__).parents[1] / "web" / "vnccs_character_creator_v2.js").read_text(encoding="utf-8")
 
 
 def test_anima_resolution_selector_exposes_supported_presets():

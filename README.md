@@ -68,7 +68,7 @@ Let's start from the very beginning. The first thing you need to do, besides ope
 
 Inside it, you will find all the models used in the workflow. Choose the one that fits your computer and press **Download**.
 
-VNCCS uses ComfyUI's registered model inventory, including folders configured through `extra_model_paths.yaml`. Existing models in those folders are reused instead of copied or downloaded again. Nested ComfyUI names such as `anima\qwen_3_06b_base.safetensors` are preserved when a model is selected. If the same basename exists in more than one registered location, select the full nested name instead of relying on the basename.
+VNCCS uses ComfyUI's registered model inventory, including folders configured through `extra_model_paths.yaml`. Control Center merges the packaged VNCCS catalog with compatible local Anima, Illustrious, QIE2511, and Klein models discovered through `folder_paths`, so existing models in any registered root are selectable without copying or downloading them again. Catalog entries remain authoritative when they identify the same physical file; additional compatible files appear as local installed entries. Nested ComfyUI names such as `anima\qwen_3_06b_base.safetensors` and `klein-2-9b/msFlux2Klein9B_v5.safetensors` are preserved when selected. Use the full nested name when the same basename exists in more than one registered location.
 
 - **Q4** is light, but in some places the result may be a little less fancy.
 - **Q5** is a great balance between quality and performance.

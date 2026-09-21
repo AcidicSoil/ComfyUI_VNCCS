@@ -1242,6 +1242,7 @@ class TestGGUFLoaderDiagnostics:
 class TestLocalModelInventory:
     def test_classifies_supported_local_model_families(self):
         assert _local_model_family("klein-2-9b/msFlux2Klein9B_v5.safetensors", "unet") == ("Klein9b", "unet")
+        assert _local_model_family("klein-2-9b/flux-2-klein-base-4b.safetensors", "unet") is None
         assert _local_model_family("qwen/qwen-image-edit-2511-local.gguf", "unet") == ("QIE2511", "gguf")
         assert _local_model_family("Anima/anima-custom.safetensors", "unet") == ("Anima", "unet")
         assert _local_model_family("styles/animaFinalcut12Step.safetensors", "unet") == ("Anima", "unet")

@@ -859,6 +859,10 @@ def _local_model_family(rel_path, default_type):
         return None
 
     if "klein" in filename or any("klein" in part for part in parent_parts):
+        # VNCCS currently ships helper LoRAs and conditioning only for Klein 9B.
+        # Explicit 4B weights must not be exposed as Klein9b-compatible.
+        if re.search(r"(?:^|[^0-9])4b(?:[^0-9]|$)", identity):
+            return None
         return "Klein9b", model_type
     anima_named = (
         filename.startswith("anima")

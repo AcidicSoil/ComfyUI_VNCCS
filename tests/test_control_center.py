@@ -2,6 +2,7 @@
 
 import json
 import os
+import struct
 import sys
 
 import pytest
@@ -1240,6 +1241,31 @@ class TestGGUFLoaderDiagnostics:
 
 
 class TestLocalModelInventory:
+    def test_classifies_qwen_image_21_gguf_as_generation_family(self):
+        assert _local_model_family(
+            "qwen-image-2.1/qwenImage21Nvfp4Q4Q3_q4GGUF.gguf",
+            "unet",
+        ) == ("QwenImage21", "gguf")
+
+    def test_classifies_qwen_image_21_safetensors_from_architecture_header(self, tmp_path):
+        path = tmp_path / "custom-finetune.safetensors"
+        keys = [
+            "txt_in.text_norm.weight",
+            "modulation.1.weight",
+            "transformer_blocks.0.attn.norm_q.weight",
+            "transformer_blocks.0.img_mlp.gate_up.weight",
+            "img_in.weight",
+            "proj_out.weight",
+        ]
+        header = json.dumps({key: {} for key in keys}).encode("utf-8")
+        path.write_bytes(struct.pack("<Q", len(header)) + header)
+
+        assert _local_model_family(
+            "custom/custom-finetune.safetensors",
+            "unet",
+            full_path=str(path),
+        ) == ("QwenImage21", "unet")
+
     def test_classifies_supported_local_model_families(self):
         assert _local_model_family("klein-2-9b/msFlux2Klein9B_v5.safetensors", "unet") == ("Klein9b", "unet")
         assert _local_model_family("klein-2-9b/flux-2-klein-base-4b.safetensors", "unet") is None

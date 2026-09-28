@@ -839,9 +839,37 @@ _LOCAL_MODEL_SOURCES = (
     ("unet", "unet"),
     ("checkpoints", "checkpoint"),
 )
+_QWEN_IMAGE21_REQUIRED_KEYS = {
+    "txt_in.text_norm.weight",
+    "modulation.1.weight",
+    "transformer_blocks.0.attn.norm_q.weight",
+    "img_in.weight",
+    "proj_out.weight",
+}
+_QWEN_IMAGE21_MLP_KEYS = {
+    "transformer_blocks.0.img_mlp.gate_up.weight",
+    "transformer_blocks.0.img_mlp.proj.weight",
+}
+_MAX_SAFETENSORS_HEADER_BYTES = 32 * 1024 * 1024
 
 
-def _local_model_family(rel_path, default_type):
+def _safetensors_is_qwen_image21(path):
+    try:
+        with open(path, "rb") as handle:
+            raw_size = handle.read(8)
+            if len(raw_size) != 8:
+                return False
+            header_size = struct.unpack("<Q", raw_size)[0]
+            if not 0 < header_size <= _MAX_SAFETENSORS_HEADER_BYTES:
+                return False
+            header = json.loads(handle.read(header_size))
+        keys = set(header) - {"__metadata__"}
+        return _QWEN_IMAGE21_REQUIRED_KEYS <= keys and bool(_QWEN_IMAGE21_MLP_KEYS & keys)
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return False
+
+
+def _local_model_family(rel_path, default_type, full_path=None):
     """Classify only model families VNCCS already knows how to load."""
     normalized = str(rel_path or "").replace("\\", "/").strip("/")
     identity = normalized.lower()
@@ -873,6 +901,14 @@ def _local_model_family(rel_path, default_type):
         return "Anima", model_type
     if "2511" in identity and ("qwen" in identity or "qie" in identity):
         return "QIE2511", model_type
+    qwen21_named = (
+        "qwenimage21" in identity.replace("-", "").replace("_", "").replace(".", "")
+        or any(part in {"qwen-image-2.1", "qwen_image_2.1", "qwenimage21"} for part in parent_parts)
+    )
+    if qwen21_named:
+        return "QwenImage21", model_type
+    if ext == ".safetensors" and full_path and _safetensors_is_qwen_image21(full_path):
+        return "QwenImage21", model_type
     return None
 
 
@@ -888,17 +924,17 @@ def _local_model_entries():
             continue
         for value in filenames:
             rel_path = str(value or "").replace("\\", "/").strip("/")
-            family = _local_model_family(rel_path, default_type)
-            if family is None:
-                continue
             try:
                 _validate_model_filename(rel_path)
             except ValueError:
                 continue
-            kind, model_type = family
-            # Resolve through ComfyUI so aliases such as unet/diffusion_models and
-            # extra_model_paths collapse to one physical model when possible.
+            # Resolve through ComfyUI before classification so safetensors variants
+            # can be identified from their bounded header without loading tensors.
             full_path = get_full_path_agnostic(folder_paths, folder_key, rel_path, require_exists=True)
+            family = _local_model_family(rel_path, default_type, full_path=full_path)
+            if family is None:
+                continue
+            kind, model_type = family
             identity = os.path.normcase(os.path.abspath(full_path)) if full_path else f"{folder_key}:{rel_path.lower()}"
             if identity in seen_paths:
                 continue

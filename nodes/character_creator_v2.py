@@ -140,6 +140,23 @@ ANIMA_DEFAULTS = {
     "lora_stack": [],
 }
 
+QWEN_IMAGE21_DEFAULTS = {
+    "generation_mode": "qwen_image_2_1",
+    "resolution_preset": "normal",
+    "diffusion_model_name": "",
+    "clip_name": "",
+    "vae_name": "",
+    "clip_type": "qwen_image",
+    "sampler": "euler",
+    "scheduler": "simple",
+    "steps": 25,
+    "cfg": 1.0,
+    "turbo_enabled": False,
+    "dmd_lora_name": "",
+    "dmd_lora_strength": 1.0,
+    "lora_stack": [],
+}
+
 
 def resolve_generation_seed(gen_settings):
     seed = int(gen_settings.get("seed", 0) or 0)
@@ -153,6 +170,11 @@ ANIMA_RESOLUTION_PRESETS = {
     "normal": (DEFAULT_PREVIEW_WIDTH, DEFAULT_PREVIEW_HEIGHT),
     "high": (856, 2048),
     "maximum": (1024, 2456),
+}
+QWEN_IMAGE21_RESOLUTION_PRESETS = {
+    "normal": (DEFAULT_PREVIEW_WIDTH, DEFAULT_PREVIEW_HEIGHT),
+    "high": (864, 2048),
+    "maximum": (1024, 2464),
 }
 
 
@@ -424,17 +446,23 @@ def normalize_gen_settings(gen_settings):
     generation_mode = str(normalized.get("generation_mode", "illustrious")).lower()
     mode_settings = normalized.get("mode_settings", {})
     mode_profile = mode_settings.get(generation_mode, {}) if isinstance(mode_settings, dict) else {}
-    defaults = ANIMA_DEFAULTS if generation_mode == "anima" else ILLUSTRIOUS_DEFAULTS
+    defaults = {
+        "anima": ANIMA_DEFAULTS,
+        "qwen_image_2_1": QWEN_IMAGE21_DEFAULTS,
+    }.get(generation_mode, ILLUSTRIOUS_DEFAULTS)
     merged = dict(defaults)
     merged.update(normalized)
     if isinstance(mode_profile, dict):
         merged.update(mode_profile)
     merged["generation_mode"] = generation_mode
-    if generation_mode == "anima":
+    if generation_mode in {"anima", "qwen_image_2_1"}:
         resolution_preset = str(merged.get("resolution_preset", "normal") or "normal").lower()
-        merged["resolution_preset"] = (
-            resolution_preset if resolution_preset in ANIMA_RESOLUTION_PRESETS else "normal"
+        presets = (
+            QWEN_IMAGE21_RESOLUTION_PRESETS
+            if generation_mode == "qwen_image_2_1"
+            else ANIMA_RESOLUTION_PRESETS
         )
+        merged["resolution_preset"] = resolution_preset if resolution_preset in presets else "normal"
     return merged
 
 
@@ -566,18 +594,91 @@ def load_anima_assets(gen_settings):
     return model, clip, vae
 
 
-def load_generation_assets(gen_settings):
-    generation_mode = str(gen_settings.get("generation_mode", "illustrious")).lower()
+def load_qwen_image21_assets(gen_settings):
+    requested_model = gen_settings.get("diffusion_model_name")
+    requested_clip = gen_settings.get("clip_name")
+    requested_vae = gen_settings.get("vae_name")
+    model_name = canonical_model_name("diffusion_models", requested_model) or requested_model
+    clip_name = canonical_model_name("text_encoders", requested_clip) or requested_clip
+    vae_name = canonical_model_name("vae", requested_vae) or requested_vae
 
-    if generation_mode == "anima":
-        asset_key = (
+    if not model_name:
+        raise ValueError("No Diffusion Model selected in Qwen Image 2.1 mode")
+    if not clip_name:
+        raise ValueError("No text encoder selected in Qwen Image 2.1 mode")
+    if not vae_name:
+        raise ValueError("No VAE selected in Qwen Image 2.1 mode")
+
+    is_gguf = str(model_name).lower().endswith(".gguf")
+    loader_classes = ["UnetLoaderGGUF"] if is_gguf else ["UNETLoader", "Load Diffusion Model"]
+    model = _call_loader_node(
+        loader_classes,
+        ["load_unet", "load_model", "load_diffusion_model"],
+        unet_name=model_name,
+        model_name=model_name,
+        diffusion_model_name=model_name,
+        weight_dtype="default",
+    )
+    if model is None and not is_gguf and hasattr(comfy.sd, "load_diffusion_model"):
+        model_path = get_full_path_agnostic(
+            folder_paths, "diffusion_models", model_name, require_exists=True
+        )
+        if model_path:
+            model = comfy.sd.load_diffusion_model(model_path)
+
+    clip = _call_loader_node(
+        ["CLIPLoader", "Load CLIP"],
+        ["load_clip", "load_model"],
+        clip_name=clip_name,
+        model_name=clip_name,
+        type="qwen_image",
+        device="default",
+    )
+    if clip is None and hasattr(comfy.sd, "load_clip"):
+        clip_path = get_full_path_agnostic(
+            folder_paths, "text_encoders", clip_name, require_exists=True
+        )
+        if clip_path:
+            clip = comfy.sd.load_clip(
+                ckpt_paths=[clip_path],
+                embedding_directory=folder_paths.get_folder_paths("embeddings"),
+                clip_type=comfy.sd.CLIPType.QWEN_IMAGE,
+            )
+
+    vae = _call_loader_node(
+        ["VAELoader", "Load VAE"],
+        ["load_vae", "load_model"],
+        vae_name=vae_name,
+        model_name=vae_name,
+    )
+    if model is None:
+        raise ValueError(f"Failed to load Qwen Image 2.1 Diffusion Model '{model_name}'")
+    if clip is None:
+        raise ValueError(f"Failed to load Qwen Image 2.1 text encoder '{clip_name}'")
+    if vae is None:
+        raise ValueError(f"Failed to load Qwen Image 2.1 VAE '{vae_name}'")
+    return model, clip, vae
+
+
+def generation_asset_key(gen_settings):
+    generation_mode = str(gen_settings.get("generation_mode", "illustrious")).lower()
+    if generation_mode in {"anima", "qwen_image_2_1"}:
+        return (
             generation_mode,
             gen_settings.get("diffusion_model_name", ""),
             gen_settings.get("clip_name", ""),
             gen_settings.get("vae_name", ""),
         )
-        model, clip, vae = load_anima_assets(gen_settings)
-        return asset_key, model, clip, vae
+    return generation_mode, gen_settings.get("ckpt_name", "")
+
+
+def load_generation_assets(gen_settings):
+    generation_mode = str(gen_settings.get("generation_mode", "illustrious")).lower()
+
+    if generation_mode in {"anima", "qwen_image_2_1"}:
+        loader = load_qwen_image21_assets if generation_mode == "qwen_image_2_1" else load_anima_assets
+        model, clip, vae = loader(gen_settings)
+        return generation_asset_key(gen_settings), model, clip, vae
 
     ckpt_name = gen_settings.get("ckpt_name")
     if not ckpt_name:
@@ -606,15 +707,17 @@ def load_generation_assets(gen_settings):
 
 
 def get_generation_resolution(gen_settings):
-    if str(gen_settings.get("generation_mode", "illustrious")).lower() != "anima":
+    mode = str(gen_settings.get("generation_mode", "illustrious")).lower()
+    if mode not in {"anima", "qwen_image_2_1"}:
         return DEFAULT_PREVIEW_WIDTH, DEFAULT_PREVIEW_HEIGHT
 
     preset = str(gen_settings.get("resolution_preset", "normal") or "normal").lower()
-    return ANIMA_RESOLUTION_PRESETS.get(preset, ANIMA_RESOLUTION_PRESETS["normal"])
+    presets = QWEN_IMAGE21_RESOLUTION_PRESETS if mode == "qwen_image_2_1" else ANIMA_RESOLUTION_PRESETS
+    return presets.get(preset, presets["normal"])
 
 
 def create_generation_latent(model, width, height, gen_settings, batch_size=1):
-    if str(gen_settings.get("generation_mode", "illustrious")).lower() == "anima":
+    if str(gen_settings.get("generation_mode", "illustrious")).lower() in {"anima", "qwen_image_2_1"}:
         generated = _call_node_method(
             ["EmptyLatentImage"],
             ["generate"],
@@ -630,7 +733,7 @@ def create_generation_latent(model, width, height, gen_settings, batch_size=1):
 
 
 def sample_generation_latent(model, positive, negative, latent, seed, steps, cfg, sampler_name, scheduler, gen_settings):
-    if str(gen_settings.get("generation_mode", "illustrious")).lower() == "anima":
+    if str(gen_settings.get("generation_mode", "illustrious")).lower() in {"anima", "qwen_image_2_1"}:
         sampled = _call_node_method(
             ["KSampler"],
             ["sample"],
@@ -666,7 +769,11 @@ def sample_generation_latent(model, positive, negative, latent, seed, steps, cfg
 
 
 def encode_generation_prompt(clip, text, gen_settings):
-    if str(gen_settings.get("generation_mode", "illustrious")).lower() == "anima":
+    mode = str(gen_settings.get("generation_mode", "illustrious")).lower()
+    if mode == "qwen_image_2_1":
+        tokens = clip.tokenize(text, keep_vision=True, prevent_empty_text=True)
+        return clip.encode_from_tokens_scheduled(tokens)
+    if mode == "anima":
         encoded = _call_node_method(
             ["CLIPTextEncode"],
             ["encode"],
@@ -681,6 +788,44 @@ def encode_generation_prompt(clip, text, gen_settings):
     tokens = clip.tokenize(text)
     cond, pooled = clip.encode_from_tokens(tokens, return_pooled=True)
     return [[cond, {"pooled_output": pooled}]]
+
+
+def apply_generation_loras(model, clip, gen_settings, character_info, apply_lora):
+    generation_mode = str(gen_settings.get("generation_mode", "illustrious")).lower()
+
+    if generation_mode == "anima":
+        if gen_settings.get("turbo_enabled"):
+            model, clip = apply_lora(
+                model,
+                clip,
+                gen_settings.get("dmd_lora_name"),
+                float(gen_settings.get("dmd_lora_strength", 1.0)),
+                0.0,
+            )
+    elif generation_mode == "illustrious":
+        model, clip = apply_lora(
+            model,
+            clip,
+            gen_settings.get("dmd_lora_name"),
+            float(gen_settings.get("dmd_lora_strength", 1.0)),
+        )
+        age_name = gen_settings.get("age_lora_name")
+        if age_name:
+            model, clip = apply_lora(
+                model,
+                clip,
+                age_name,
+                age_strength(int(character_info.get("age", 18))),
+            )
+
+    for item in gen_settings.get("lora_stack", []):
+        model, clip = apply_lora(
+            model,
+            clip,
+            item.get("name"),
+            float(item.get("strength", 1.0)),
+        )
+    return model, clip
 
 
 def validate_anima_conditioning(positive, negative, clip_name):
@@ -717,7 +862,7 @@ def decode_generation_samples(vae, samples, gen_settings):
                 value = value[0]
         return value
 
-    if str(gen_settings.get("generation_mode", "illustrious")).lower() == "anima":
+    if str(gen_settings.get("generation_mode", "illustrious")).lower() in {"anima", "qwen_image_2_1"}:
         latent_payload = samples if isinstance(samples, dict) else {"samples": samples}
         latent_tensor = unwrap_latent_samples(latent_payload)
         decode_payload = {"samples": latent_tensor}
@@ -1033,16 +1178,7 @@ Example:
             global PREVIEW_CACHE
             
             with torch.inference_mode():
-                asset_key = None
-                if generation_mode == "anima":
-                    asset_key = (
-                        generation_mode,
-                        gen_settings.get("diffusion_model_name", ""),
-                        gen_settings.get("clip_name", ""),
-                        gen_settings.get("vae_name", ""),
-                    )
-                else:
-                    asset_key = (generation_mode, gen_settings.get("ckpt_name", ""))
+                asset_key = generation_asset_key(gen_settings)
 
                 if PREVIEW_CACHE["asset_key"] == asset_key and PREVIEW_CACHE["asset_obj"]:
                     print(f"[VNCCS] Preview: Using Cached Assets {asset_key}")
@@ -1076,29 +1212,13 @@ Example:
                         return comfy.sd.load_lora_for_models(m, c, lora_dict, l_strength, l_strength if clip_strength is None else clip_strength)
                     return m, c
 
-                if generation_mode == "anima":
-                    if gen_settings.get("turbo_enabled"):
-                        dmd_lora_name = gen_settings.get("dmd_lora_name")
-                        dmd_lora_strength = float(gen_settings.get("dmd_lora_strength", 1.0))
-                        model, clip = apply_lora_cached(model, clip, dmd_lora_name, dmd_lora_strength, 0.0)
-
-                    lora_stack = gen_settings.get("lora_stack", [])
-                    for l_item in lora_stack:
-                        model, clip = apply_lora_cached(model, clip, l_item.get("name"), float(l_item.get("strength", 1.0)))
-                else:
-                    dmd_lora_name = gen_settings.get("dmd_lora_name")
-                    dmd_lora_strength = float(gen_settings.get("dmd_lora_strength", 1.0))
-                    model, clip = apply_lora_cached(model, clip, dmd_lora_name, dmd_lora_strength)
-
-                    age_lora_name = gen_settings.get("age_lora_name")
-                    if age_lora_name:
-                        age = int(char_info.get("age", 18))
-                        age_str = age_strength(age)
-                        model, clip = apply_lora_cached(model, clip, age_lora_name, age_str)
-
-                    lora_stack = gen_settings.get("lora_stack", [])
-                    for l_item in lora_stack:
-                        model, clip = apply_lora_cached(model, clip, l_item.get("name"), float(l_item.get("strength", 1.0)))
+                model, clip = apply_generation_loras(
+                    model,
+                    clip,
+                    gen_settings,
+                    char_info,
+                    apply_lora_cached,
+                )
 
                 # 2. Encode Prompts
                 positive_cond = encode_generation_prompt(clip, positive_text, gen_settings)
@@ -1291,32 +1411,13 @@ class CharacterCreatorV2:
                 return comfy.sd.load_lora_for_models(m, c, lora, l_strength, l_strength if clip_strength is None else clip_strength)
             return m, c
 
-        # Apply DMD2
-        if gen_settings.get("generation_mode") == "anima":
-            if gen_settings.get("turbo_enabled"):
-                dmd_name = gen_settings.get("dmd_lora_name")
-                dmd_str = float(gen_settings.get("dmd_lora_strength", 1.0))
-                model, clip = apply_lora_safe(model, clip, dmd_name, dmd_str, 0.0)
-
-            stack = gen_settings.get("lora_stack", [])
-            for item in stack:
-                model, clip = apply_lora_safe(model, clip, item.get("name"), float(item.get("strength", 1.0)))
-        else:
-            dmd_name = gen_settings.get("dmd_lora_name")
-            dmd_str = float(gen_settings.get("dmd_lora_strength", 1.0))
-            model, clip = apply_lora_safe(model, clip, dmd_name, dmd_str)
-
-            # Apply Age LoRA
-            age_name = gen_settings.get("age_lora_name")
-            if age_name:
-                age = int(info.get("age", 18))
-                age_str = age_strength(age)
-                model, clip = apply_lora_safe(model, clip, age_name, age_str)
-
-            # Apply Stack
-            stack = gen_settings.get("lora_stack", [])
-            for item in stack:
-                model, clip = apply_lora_safe(model, clip, item.get("name"), float(item.get("strength", 1.0)))
+        model, clip = apply_generation_loras(
+            model,
+            clip,
+            gen_settings,
+            info,
+            apply_lora_safe,
+        )
 
         # Encode Conditioning
         conditioning_pos = encode_generation_prompt(clip, positive_prompt, gen_settings)

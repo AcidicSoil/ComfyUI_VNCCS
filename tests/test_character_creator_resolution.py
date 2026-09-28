@@ -140,6 +140,48 @@ def test_illustrious_ignores_anima_resolution_preset():
     assert get_generation_resolution(settings) == (640, 1536)
 
 
+def test_qwen_image_21_asset_key_includes_weight_encoder_and_vae():
+    settings = {
+        "generation_mode": "qwen_image_2_1",
+        "diffusion_model_name": "qwen21.gguf",
+        "clip_name": "qwen3vl.safetensors",
+        "vae_name": "qwen21-vae.safetensors",
+        "ckpt_name": "stale-checkpoint.safetensors",
+    }
+
+    assert character_creator_v2.generation_asset_key(settings) == (
+        "qwen_image_2_1",
+        "qwen21.gguf",
+        "qwen3vl.safetensors",
+        "qwen21-vae.safetensors",
+    )
+
+
+def test_qwen_image_21_loras_skip_illustrious_dmd_and_age_but_keep_stack():
+    calls = []
+
+    def fake_apply(model, clip, name, strength, clip_strength=None):
+        calls.append((name, strength, clip_strength))
+        return model, clip
+
+    character_creator_v2.apply_generation_loras(
+        object(),
+        object(),
+        {
+            "generation_mode": "qwen_image_2_1",
+            "turbo_enabled": True,
+            "dmd_lora_name": "illustrious-dmd.safetensors",
+            "dmd_lora_strength": 0.8,
+            "age_lora_name": "age.safetensors",
+            "lora_stack": [{"name": "qwen-style.safetensors", "strength": 0.6}],
+        },
+        {"age": 24},
+        fake_apply,
+    )
+
+    assert calls == [("qwen-style.safetensors", 0.6, None)]
+
+
 def test_load_anima_assets_passes_canonical_nested_names_to_comfy_loaders(tmp_path, monkeypatch):
     import folder_paths as fp
 

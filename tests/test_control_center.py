@@ -1277,6 +1277,44 @@ class TestLocalModelInventory:
         assert _local_model_family("Illustrious/customMix.safetensors", "checkpoint") == ("Illustrious", "checkpoint")
         assert _local_model_family("flux/random-flux.safetensors", "unet") is None
 
+    def test_discovers_qwen_image_21_gguf_from_registered_gguf_folder(self, monkeypatch, tmp_path):
+        files = {
+            "diffusion_models": [],
+            "unet": [],
+            "unet_gguf": ["qwenImage21Nvfp4Q4Q3_q4GGUF.gguf"],
+            "checkpoints": [],
+        }
+        roots = {key: tmp_path / key for key in files}
+        target = roots["unet_gguf"] / "qwenImage21Nvfp4Q4Q3_q4GGUF.gguf"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"GGUF" + b"x" * 4096)
+
+        monkeypatch.setattr(_CONTROL_CENTER_MODULE.folder_paths, "get_filename_list", lambda key: files.get(key, []))
+        monkeypatch.setattr(
+            _CONTROL_CENTER_MODULE,
+            "get_full_path_agnostic",
+            lambda _fp, key, rel, require_exists=False: str(roots[key] / rel)
+            if key in roots and (roots[key] / rel).exists() else None,
+        )
+        monkeypatch.setattr(
+            _CONTROL_CENTER_MODULE.folder_paths,
+            "get_folder_paths",
+            lambda key: [str(roots[key])] if key in roots else [],
+        )
+
+        entries = _local_model_entries()
+        qwen = [entry for entry in entries if entry["kind"] == "QwenImage21"]
+
+        assert qwen == [{
+            "name": "qwenImage21Nvfp4Q4Q3_q4GGUF.gguf",
+            "type": "gguf",
+            "kind": "QwenImage21",
+            "local_path": "models/unet_gguf/qwenImage21Nvfp4Q4Q3_q4GGUF.gguf",
+            "description": "Local QwenImage21 model discovered from ComfyUI 'unet_gguf'.",
+            "source": "local",
+            "local": True,
+        }]
+
     def test_discovers_models_from_registered_extra_paths(self, monkeypatch, tmp_path):
         files = {
             "diffusion_models": [

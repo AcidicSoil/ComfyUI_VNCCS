@@ -83,6 +83,7 @@ _PIPELINE_LOCAL_LORAS = {
 }
 _FOLDER_MAP = {
     "unet": ["unet", "diffusion_models"],
+    "unet_gguf": ["unet_gguf", "unet", "diffusion_models"],
     "checkpoints": ["checkpoints"],
     "loras": ["loras"],
     "clip": ["clip"],
@@ -837,6 +838,7 @@ def _dedupe_config_by_name(config):
 _LOCAL_MODEL_SOURCES = (
     ("diffusion_models", "unet"),
     ("unet", "unet"),
+    ("unet_gguf", "unet"),
     ("checkpoints", "checkpoint"),
 )
 _QWEN_IMAGE21_REQUIRED_KEYS = {

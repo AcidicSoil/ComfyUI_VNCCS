@@ -19,6 +19,7 @@ from ..utils import (
 from .character_creator_v2 import (
     ANIMA_DEFAULTS,
     ILLUSTRIOUS_DEFAULTS,
+    QWEN_IMAGE21_DEFAULTS,
     load_generation_assets,
     normalize_gen_settings,
     get_lora_full_path,
@@ -107,6 +108,7 @@ def default_generation_settings():
     settings.setdefault("mode_settings", {
         "illustrious": dict(ILLUSTRIOUS_DEFAULTS),
         "anima": dict(ANIMA_DEFAULTS),
+        "qwen_image_2_1": dict(QWEN_IMAGE21_DEFAULTS),
     })
     return settings
 
@@ -124,9 +126,14 @@ def build_emotion_pipe(generation_model="Anima", generation_settings="{}"):
     except Exception:
         parsed = {}
 
-    mode = str(generation_model or parsed.get("generation_mode") or "Anima").lower()
-    if mode not in ("illustrious", "anima"):
-        mode = "anima"
+    raw_mode = str(generation_model or parsed.get("generation_mode") or "Anima").strip().lower()
+    mode_aliases = {
+        "anima": "anima",
+        "illustrious": "illustrious",
+        "qwen image 2.1": "qwen_image_2_1",
+        "qwen_image_2_1": "qwen_image_2_1",
+    }
+    mode = mode_aliases.get(raw_mode, "anima")
 
     merged = default_generation_settings()
     if isinstance(parsed, dict):
@@ -192,6 +199,12 @@ def build_emotion_pipe(generation_model="Anima", generation_settings="{}"):
         pipe.model_entry = {
             "name": "Anima",
             "kind": "Anima",
+            "local_path": gen_settings.get("diffusion_model_name", ""),
+        }
+    elif mode == "qwen_image_2_1":
+        pipe.model_entry = {
+            "name": "Qwen Image 2.1",
+            "kind": "QwenImage21",
             "local_path": gen_settings.get("diffusion_model_name", ""),
         }
     return pipe, seed
@@ -473,9 +486,9 @@ class EmotionGeneratorV2:
 
         return {
             "required": {
-                "generation_model": (["Illustrious", "Anima"], {"default": "Anima"}),
+                "generation_model": (["Illustrious", "Anima", "Qwen Image 2.1"], {"default": "Anima"}),
                 "generation_settings": ("STRING", {"default": json.dumps(default_generation_settings()), "multiline": False}),
-                "prompt_style": (["SDXL Style", "Anima"], {"default": "Anima"}),
+                "prompt_style": (["SDXL Style", "Anima", "Qwen Image 2.1"], {"default": "Anima"}),
                 "character": (characters, {"default": characters[0] if characters else "Character Name"}),
                 # JSON lists passed as strings from frontend
                 "costumes_data": ("STRING", {"default": "[]", "multiline": False}),
@@ -491,8 +504,9 @@ class EmotionGeneratorV2:
 
     def generate_emotions_v2(self, generation_model="Anima", generation_settings="{}", prompt_style="Anima", character="Character Name", costumes_data="[]", emotions_data="[]"):
         pipe, pipe_seed = build_emotion_pipe(generation_model, generation_settings)
-        mode = str(generation_model or "Anima").lower()
-        effective_prompt_style = "Anima" if mode == "anima" else "SDXL Style"
+        raw_mode = str(generation_model or "Anima").strip().lower()
+        mode = "qwen_image_2_1" if raw_mode in {"qwen image 2.1", "qwen_image_2_1"} else raw_mode
+        effective_prompt_style = "Anima" if mode in {"anima", "qwen_image_2_1"} else "SDXL Style"
 
         try:
             generation_settings_data = json.loads(generation_settings) if generation_settings else {}

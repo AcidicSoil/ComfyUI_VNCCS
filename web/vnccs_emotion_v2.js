@@ -1165,7 +1165,12 @@ app.registerExtension({
                     const matches = values.filter((value) => normalize(value).split("/").pop() === basename);
                     return matches.length === 1 ? matches[0] : requested;
                 };
-                const promptStyleForMode = (mode) => String(mode || "anima").toLowerCase() === "anima" ? "Anima" : "SDXL Style";
+                const promptStyleForMode = (mode) => {
+                    const normalized = String(mode || "anima").toLowerCase();
+                    if (normalized === "anima") return "Anima";
+                    if (normalized === "qwen_image_2_1") return "Qwen Image 2.1";
+                    return "SDXL Style";
+                };
                 const initialSharedSeed = 0;
                 const GENERATION_DEFAULTS = {
                     generation_mode: "anima",
@@ -1211,6 +1216,20 @@ app.registerExtension({
                             steps: 30, cfg: 4.0, seed: initialSharedSeed, seed_mode: "fixed",
                             turbo_enabled: false, turbo_previous_settings: null,
                             dmd_lora_name: ANIMA_TURBO_LORA_NAME, dmd_lora_strength: 1.0,
+                            lora_stack: [
+                                { name: "", strength: 1.0 },
+                                { name: "", strength: 1.0 },
+                                { name: "", strength: 1.0 },
+                                { name: "", strength: 1.0 },
+                                { name: "", strength: 1.0 }
+                            ]
+                        },
+                        qwen_image_2_1: {
+                            diffusion_model_name: "", clip_name: "", vae_name: "",
+                            clip_type: "qwen_image", sampler: "euler", scheduler: "simple",
+                            steps: 25, cfg: 1.0, seed: initialSharedSeed, seed_mode: "fixed",
+                            turbo_enabled: false, turbo_previous_settings: null,
+                            dmd_lora_name: "", dmd_lora_strength: 1.0,
                             lora_stack: [
                                 { name: "", strength: 1.0 },
                                 { name: "", strength: 1.0 },
@@ -1268,7 +1287,7 @@ app.registerExtension({
                     vae_models: [],
                     loras: [],
                 };
-                const modelPickerOpen = { illustrious: false, anima: false };
+                const modelPickerOpen = { illustrious: false, anima: false, qwen_image_2_1: false };
 
                 node._randomizeSeedIfNeeded = () => {
                     if ((state.gen.seed_mode || "fixed") === "randomize") {
@@ -1336,7 +1355,9 @@ app.registerExtension({
                         && clips.some(entry => ccKind(entry) === "anima")
                         && vaes.some(entry => ccKind(entry) === "anima");
                     const hasIllustrious = models.some(entry => ccKind(entry) === "illustrious" && ccType(entry) === "checkpoint");
-                    return hasAnima && hasIllustrious;
+                    const isQwenKind = entry => ["qi2", "qwenimage21"].includes(ccKind(entry));
+                    const hasQwen = models.some(isQwenKind) && clips.some(isQwenKind) && vaes.some(isQwenKind);
+                    return hasAnima && hasIllustrious && hasQwen;
                 };
 
                 function markNodeDirty() {
@@ -1438,7 +1459,7 @@ app.registerExtension({
                     state.gen.seed_mode = sharedSeedMode;
                     state.gen.mode_settings[mode] = { ...state.gen };
                     delete state.gen.mode_settings[mode].mode_settings;
-                    for (const profileMode of ["illustrious", "anima"]) {
+                    for (const profileMode of ["illustrious", "anima", "qwen_image_2_1"]) {
                         const profile = state.gen.mode_settings[profileMode] || { ...GENERATION_DEFAULTS.mode_settings[profileMode] };
                         state.gen.mode_settings[profileMode] = {
                             ...profile,
@@ -1448,13 +1469,14 @@ app.registerExtension({
                     }
 
                     commitWidget(generationSettingsWidget, JSON.stringify(state.gen), callCallback);
-                    commitWidget(modelWidget, mode === "anima" ? "Anima" : "Illustrious", callCallback);
+                    const modelLabel = mode === "anima" ? "Anima" : mode === "qwen_image_2_1" ? "Qwen Image 2.1" : "Illustrious";
+                    commitWidget(modelWidget, modelLabel, callCallback);
                     if (styleWidget) commitWidget(styleWidget, promptStyleForMode(mode), callCallback);
                     window.dispatchEvent(new CustomEvent("vnccs-emotion-studio-generation-mode-changed"));
                 }
 
                 function setGenerationMode(mode) {
-                    mode = mode === "illustrious" ? "illustrious" : "anima";
+                    mode = ["illustrious", "anima", "qwen_image_2_1"].includes(mode) ? mode : "anima";
                     const current = (state.gen.generation_mode || "anima").toLowerCase();
                     const sharedSeed = state.gen.seed ?? initialSharedSeed;
                     const sharedSeedMode = state.gen.seed_mode || "fixed";
@@ -1601,6 +1623,19 @@ app.registerExtension({
                     if (vae) state.gen.vae_name = ccRelPath(vae);
                     else if (!state.gen.vae_name) state.gen.vae_name = ANIMA_VAE_NAME;
                 };
+                const qwenKind = entry => ["qi2", "qwenimage21"].includes(ccKind(entry));
+                const qwenEntries = (section, predicate = null) => (ccConfig?.[section] || []).filter(entry =>
+                    qwenKind(entry) && (!predicate || predicate(entry))
+                );
+                const ensureQwenDefaultAux = () => {
+                    const clip = qwenEntries("clip")[0];
+                    const vae = qwenEntries("vae")[0];
+                    if (clip) state.gen.clip_name = ccRelPath(clip);
+                    if (vae) state.gen.vae_name = ccRelPath(vae);
+                    state.gen.clip_type = "qwen_image";
+                    state.gen.turbo_enabled = false;
+                    state.gen.dmd_lora_name = "";
+                };
 
                 const selectCcAsset = (key, rel) => {
                     if (!rel) return;
@@ -1620,6 +1655,12 @@ app.registerExtension({
                     selectCcAsset("ckpt_name", rel);
                 };
 
+                const selectQwenModel = (rel) => {
+                    ensureQwenDefaultAux();
+                    modelPickerOpen.qwen_image_2_1 = false;
+                    selectCcAsset("diffusion_model_name", rel);
+                };
+
                 const downloadAnimaBundle = async (cat, entry) => {
                     ensureAnimaDefaultAux();
                     await ccDownloadEntry(cat, entry);
@@ -1627,6 +1668,17 @@ app.registerExtension({
                     const vae = ccFirstEntry("vae", "Anima");
                     if (clip && ccResolveStatus(clip, "clip") !== "installed") await ccDownloadEntry("clip", clip);
                     if (vae && ccResolveStatus(vae, "vae") !== "installed") await ccDownloadEntry("vae", vae);
+                };
+
+                const downloadQwenBundle = async (cat, entry) => {
+                    await ccDownloadEntry(cat, entry);
+                    for (const [section, category] of [["clip", "clip"], ["vae", "vae"]]) {
+                        const dependency = qwenEntries(section)[0];
+                        if (dependency && ccResolveStatus(dependency, category) !== "installed") {
+                            await ccDownloadEntry(category, dependency);
+                        }
+                    }
+                    ensureQwenDefaultAux();
                 };
 
                 const setCcTurboMode = (enabled, rel) => {
@@ -1924,9 +1976,8 @@ app.registerExtension({
                 };
 
                 const renderControlCenterCards = () => {
-                    if (!generationEls.animaModelCards || !generationEls.illustriousModelCards) return;
+                    if (!generationEls.animaModelCards || !generationEls.illustriousModelCards || !generationEls.qwenModelCards) return;
                     const currentMode = (state.gen.generation_mode || "anima").toLowerCase();
-                    const isAnimaMode = currentMode === "anima";
 
                     const animaModels = mergeCcAndLocalEntries(
                         ccEntries("models", "Anima", entry => ccType(entry) === "unet"),
@@ -1945,9 +1996,11 @@ app.registerExtension({
                         onSelect: rel => selectAnimaModel(rel),
                         onDownload: downloadAnimaBundle,
                     });
-                    const currentAnima = String(state.gen.diffusion_model_name || "").replace(/\\/g, "/");
-                    if (!currentAnima && animaModels[0]) selectAnimaModel(ccRelPath(animaModels[0]));
-                    ensureAnimaDefaultAux();
+                    if (currentMode === "anima") {
+                        const currentAnima = String(state.gen.diffusion_model_name || "").replace(/\\/g, "/");
+                        if (!currentAnima && animaModels[0]) selectAnimaModel(ccRelPath(animaModels[0]));
+                        ensureAnimaDefaultAux();
+                    }
 
                     const illustriousDefaults = (ccConfig?.models || []).filter(entry => {
                         const kind = ccKind(entry);
@@ -1969,12 +2022,35 @@ app.registerExtension({
                         emptyText: "No Illustrious checkpoints found.",
                         onSelect: rel => selectIllustriousModel(rel),
                     });
-                    const currentIllustrious = String(state.gen.ckpt_name || "").replace(/\\/g, "/");
-                    if (!currentIllustrious && illustriousCkpts[0]) selectCcAsset("ckpt_name", ccRelPath(illustriousCkpts[0]));
+                    if (currentMode === "illustrious") {
+                        const currentIllustrious = String(state.gen.ckpt_name || "").replace(/\\/g, "/");
+                        if (!currentIllustrious && illustriousCkpts[0]) selectCcAsset("ckpt_name", ccRelPath(illustriousCkpts[0]));
+                    }
 
-                    generationEls.animaModelCards.style.display = isAnimaMode ? "flex" : "none";
-                    generationEls.illustriousModelCards.style.display = isAnimaMode ? "none" : "flex";
-                    if (generationEls.animaLoraCards) renderModeLoraCards(generationEls.animaLoraCards, currentMode);
+                    const qwenModels = qwenEntries("models", entry => ["gguf", "unet"].includes(ccType(entry)));
+                    renderModelPicker({
+                        containerEl: generationEls.qwenModelCards,
+                        entries: qwenModels,
+                        cat: "models",
+                        key: "diffusion_model_name",
+                        mode: "qwen_image_2_1",
+                        emptyText: "No Qwen Image 2.1 diffusion models found.",
+                        onSelect: rel => selectQwenModel(rel),
+                        onDownload: downloadQwenBundle,
+                    });
+                    if (currentMode === "qwen_image_2_1") {
+                        const currentQwen = String(state.gen.diffusion_model_name || "").replace(/\\/g, "/");
+                        if (!currentQwen && qwenModels[0]) selectQwenModel(ccRelPath(qwenModels[0]));
+                        ensureQwenDefaultAux();
+                    }
+
+                    generationEls.animaModelCards.style.display = currentMode === "anima" ? "flex" : "none";
+                    generationEls.illustriousModelCards.style.display = currentMode === "illustrious" ? "flex" : "none";
+                    generationEls.qwenModelCards.style.display = currentMode === "qwen_image_2_1" ? "flex" : "none";
+                    if (generationEls.animaLoraCards) {
+                        if (currentMode === "qwen_image_2_1") generationEls.animaLoraCards.innerHTML = "";
+                        else renderModeLoraCards(generationEls.animaLoraCards, currentMode);
+                    }
                 };
 
                 function populateSelect(select, values, includeNone = false) {
@@ -2014,19 +2090,16 @@ app.registerExtension({
                         populateSelect(generationEls.scheduler, data.schedulers || ["normal", "simple"]);
                         (generationEls.loraSelects || []).forEach(select => populateSelect(select, data.loras || [], true));
 
-                        if (!state.gen.ckpt_name && data.checkpoints?.length) state.gen.ckpt_name = data.checkpoints[0];
+                        const currentMode = (state.gen.generation_mode || "anima").toLowerCase();
+                        if (!state.gen.ckpt_name && currentMode === "illustrious" && data.checkpoints?.length) state.gen.ckpt_name = data.checkpoints[0];
                         state.gen.diffusion_model_name = canonicalAssetValue(
                             data.diffusion_models,
                             state.gen.diffusion_model_name,
-                        ) || (data.diffusion_models?.[0] || state.gen.diffusion_model_name);
-                        state.gen.clip_name = canonicalAssetValue(
-                            data.text_encoders,
-                            state.gen.clip_name || ANIMA_CLIP_NAME,
-                        ) || (data.text_encoders?.[0] || ANIMA_CLIP_NAME);
-                        state.gen.vae_name = canonicalAssetValue(
-                            data.vae_models,
-                            state.gen.vae_name || ANIMA_VAE_NAME,
-                        ) || (data.vae_models?.[0] || ANIMA_VAE_NAME);
+                        ) || state.gen.diffusion_model_name || "";
+                        const clipFallback = currentMode === "anima" ? ANIMA_CLIP_NAME : state.gen.clip_name;
+                        const vaeFallback = currentMode === "anima" ? ANIMA_VAE_NAME : state.gen.vae_name;
+                        state.gen.clip_name = canonicalAssetValue(data.text_encoders, clipFallback) || clipFallback || "";
+                        state.gen.vae_name = canonicalAssetValue(data.vae_models, vaeFallback) || vaeFallback || "";
                         syncGenerationControls();
                         saveGenerationSettings();
                         try {
@@ -2044,8 +2117,10 @@ app.registerExtension({
                     const mode = (state.gen.generation_mode || "anima").toLowerCase();
                     generationEls.tabIllustrious?.classList.toggle("active", mode === "illustrious");
                     generationEls.tabAnima?.classList.toggle("active", mode === "anima");
+                    generationEls.tabQwen?.classList.toggle("active", mode === "qwen_image_2_1");
                     if (generationEls.animaModelCards) generationEls.animaModelCards.style.display = mode === "anima" ? "flex" : "none";
-                    if (generationEls.illustriousModelCards) generationEls.illustriousModelCards.style.display = mode === "anima" ? "none" : "flex";
+                    if (generationEls.illustriousModelCards) generationEls.illustriousModelCards.style.display = mode === "illustrious" ? "flex" : "none";
+                    if (generationEls.qwenModelCards) generationEls.qwenModelCards.style.display = mode === "qwen_image_2_1" ? "flex" : "none";
                     if (generationEls.steps) generationEls.steps.value = state.gen.steps ?? "";
                     if (generationEls.cfg) generationEls.cfg.value = state.gen.cfg ?? "";
                     if (generationEls.sampler) generationEls.sampler.value = state.gen.sampler || "euler";
@@ -2057,9 +2132,12 @@ app.registerExtension({
                         generationEls.seedMode.title = randomize ? "Random seed on queue" : "Fixed seed";
                         generationEls.seedMode.setAttribute("aria-pressed", randomize ? "true" : "false");
                     }
-                    if (generationEls.loraHeader) generationEls.loraHeader.innerText = mode === "anima" ? "Anima LoRA Stack" : "Illustrious LoRA Stack";
+                    if (generationEls.loraHeader) generationEls.loraHeader.innerText = mode === "anima" ? "Anima LoRA Stack" : mode === "qwen_image_2_1" ? "Qwen Image 2.1 LoRA Stack" : "Illustrious LoRA Stack";
                     if (generationEls.loraSection) generationEls.loraSection.style.display = "flex";
-                    if (generationEls.animaLoraCards) renderModeLoraCards(generationEls.animaLoraCards, mode);
+                    if (generationEls.animaLoraCards) {
+                        if (mode === "qwen_image_2_1") generationEls.animaLoraCards.innerHTML = "";
+                        else renderModeLoraCards(generationEls.animaLoraCards, mode);
+                    }
                     if (generationEls.loraRows) {
                         generationEls.loraRows.forEach((row, index) => {
                             const item = (state.gen.lora_stack || [])[index] || { name: "", strength: 1.0 };
@@ -2298,10 +2376,17 @@ app.registerExtension({
                 tabAnima.className = "ems-tab";
                 tabAnima.innerText = "Anima";
                 tabAnima.onclick = () => setGenerationMode("anima");
+                const tabQwen = document.createElement("button");
+                tabQwen.type = "button";
+                tabQwen.className = "ems-tab";
+                tabQwen.innerText = "Qwen Image 2.1";
+                tabQwen.onclick = () => setGenerationMode("qwen_image_2_1");
                 generationEls.tabIllustrious = tabIllustrious;
                 generationEls.tabAnima = tabAnima;
+                generationEls.tabQwen = tabQwen;
                 tabRow.appendChild(tabIllustrious);
                 tabRow.appendChild(tabAnima);
+                tabRow.appendChild(tabQwen);
                 generationSection.appendChild(tabRow);
 
                 const illustriousModelCards = document.createElement("div");
@@ -2313,6 +2398,11 @@ app.registerExtension({
                 animaModelCards.className = "ems-model-card-list";
                 generationEls.animaModelCards = animaModelCards;
                 generationSection.appendChild(animaModelCards);
+
+                const qwenModelCards = document.createElement("div");
+                qwenModelCards.className = "ems-model-card-list";
+                generationEls.qwenModelCards = qwenModelCards;
+                generationSection.appendChild(qwenModelCards);
 
                 const genGrid = document.createElement("div");
                 genGrid.className = "ems-generation-grid";

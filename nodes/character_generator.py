@@ -1234,6 +1234,29 @@ class VNCCS_CharacterGenerator:
             **(qwen_settings or {}),
         )
 
+    def _is_qwen_image21_pipe(self, pipe_values):
+        model_entry = pipe_values.get("model_entry") or {}
+        identity = " ".join([
+            str(model_entry.get("name", "")),
+            str(model_entry.get("local_path", "")),
+            str(_entry_kind(model_entry)),
+        ]).lower()
+        return any(token in identity for token in (
+            "qwen image 2.1", "qwen_image_2_1", "qwenimage21", "qi2",
+        ))
+
+    def _encode_emotion_text(self, pipe_values, text):
+        clip = pipe_values["clip"]
+        prompt = str(text or "")
+        if self._is_qwen_image21_pipe(pipe_values):
+            tokens = clip.tokenize(prompt, keep_vision=True, prevent_empty_text=True)
+            return clip.encode_from_tokens_scheduled(tokens)
+        return _call_comfy_node(
+            "CLIPTextEncode",
+            clip=clip,
+            text=prompt,
+        )[0]
+
     def _is_anima_pipe(self, pipe_values):
         model_entry = pipe_values.get("model_entry") or {}
         identity = " ".join([
@@ -3678,16 +3701,8 @@ class VNCCS_EmotionsGenerator(VNCCS_CharacterGenerator):
 
         detailer_positive_text = self._detailer_positive_prompt(emotion_prompt, face_details)
         print(f"[VNCCS Emotions Generator] Emotion positive: {detailer_positive_text[:500]}")
-        positive = _call_comfy_node(
-            "CLIPTextEncode",
-            clip=pipe_values["clip"],
-            text=detailer_positive_text,
-        )[0]
-        negative = _call_comfy_node(
-            "CLIPTextEncode",
-            clip=pipe_values["clip"],
-            text=str(negative_prompt or ""),
-        )[0]
+        positive = self._encode_emotion_text(pipe_values, detailer_positive_text)
+        negative = self._encode_emotion_text(pipe_values, negative_prompt)
 
         bbox_detector = _call_comfy_node(
             "UltralyticsDetectorProvider",

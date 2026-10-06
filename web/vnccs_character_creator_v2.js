@@ -1226,6 +1226,10 @@ app.registerExtension({
                             aesthetics: "masterpiece, best quality, score_7, anime",
                             negative_prompt: "bad quality, worst quality, low quality, score_1, score_2, score_3, blurry, jpeg artifacts, sepia",
                         },
+                        qwen_image_2_1: {
+                            aesthetics: "masterpiece, best quality, anime",
+                            negative_prompt: "bad quality, worst quality, low quality, blurry, jpeg artifacts, distorted anatomy, text, watermark",
+                        },
                     },
                     prompt_defaults_version: 1,
                     character_info: {
@@ -1271,10 +1275,25 @@ app.registerExtension({
                                     { name: "", strength: 1.0 },
                                     { name: "", strength: 1.0 }
                                 ]
+                            },
+                            qwen_image_2_1: {
+                                generation_mode: "qwen_image_2_1",
+                                diffusion_model_name: "", clip_name: "", vae_name: "", clip_type: "qwen_image",
+                                resolution_preset: "normal", sampler: "euler", scheduler: "simple",
+                                steps: 25, cfg: 1.0, seed: 0, seed_mode: "fixed",
+                                turbo_enabled: false, dmd_lora_name: "", dmd_lora_strength: 0.0, age_lora_name: "",
+                                lora_stack: [
+                                    { name: "", strength: 1.0 },
+                                    { name: "", strength: 1.0 },
+                                    { name: "", strength: 1.0 },
+                                    { name: "", strength: 1.0 },
+                                    { name: "", strength: 1.0 }
+                                ]
                             }
                         },
                         anima_defaults_applied: false,
-                        generation_defaults_version: 2,
+                        qwen_image_2_1_defaults_applied: false,
+                        generation_defaults_version: 5,
                         dmd_lora_name: "", dmd_lora_strength: 1.0,
                         age_lora_name: "",
                         lora_stack: [
@@ -1334,11 +1353,26 @@ app.registerExtension({
                         { name: "", strength: 1.0 }
                     ]
                 };
-                const GENERATION_DEFAULTS_VERSION = 4;
+                const QWEN_IMAGE21_DEFAULTS = {
+                    generation_mode: "qwen_image_2_1",
+                    diffusion_model_name: "", clip_name: "", vae_name: "", clip_type: "qwen_image",
+                    resolution_preset: "normal", sampler: "euler", scheduler: "simple",
+                    steps: 25, cfg: 1.0, seed: 0, seed_mode: "fixed",
+                    turbo_enabled: false, dmd_lora_name: "", dmd_lora_strength: 0.0, age_lora_name: "",
+                    lora_stack: [
+                        { name: "", strength: 1.0 },
+                        { name: "", strength: 1.0 },
+                        { name: "", strength: 1.0 },
+                        { name: "", strength: 1.0 },
+                        { name: "", strength: 1.0 }
+                    ]
+                };
+                const GENERATION_DEFAULTS_VERSION = 5;
                 const PROMPT_DEFAULTS_VERSION = 1;
                 const MODE_SETTING_KEYS = {
                     illustrious: ["ckpt_name", "sampler", "scheduler", "steps", "cfg", "seed", "seed_mode", "dmd_lora_name", "dmd_lora_strength", "turbo_previous_settings", "age_lora_name", "lora_stack"],
                     anima: ["diffusion_model_name", "clip_name", "vae_name", "resolution_preset", "sampler", "scheduler", "steps", "cfg", "seed", "seed_mode", "turbo_enabled", "dmd_lora_name", "dmd_lora_strength", "turbo_previous_settings", "lora_stack"],
+                    qwen_image_2_1: ["generation_mode", "diffusion_model_name", "clip_name", "vae_name", "clip_type", "resolution_preset", "sampler", "scheduler", "steps", "cfg", "seed", "seed_mode", "lora_stack"],
                 };
                 const MODE_PROMPT_DEFAULTS = {
                     illustrious: {
@@ -1348,6 +1382,10 @@ app.registerExtension({
                     anima: {
                         aesthetics: "masterpiece, best quality, score_7, anime",
                         negative_prompt: "bad quality, worst quality, low quality, score_1, score_2, score_3, blurry, jpeg artifacts, sepia",
+                    },
+                    qwen_image_2_1: {
+                        aesthetics: "masterpiece, best quality, anime",
+                        negative_prompt: "bad quality, worst quality, low quality, blurry, jpeg artifacts, distorted anatomy, text, watermark",
                     },
                 };
                 const CC_REPO_ID = "MIUProject/VNCCS_v3.0";
@@ -1359,6 +1397,7 @@ app.registerExtension({
                 const modelPickerOpen = {
                     illustrious: false,
                     anima: false,
+                    qwen_image_2_1: false,
                 };
                 let localAssets = {
                     checkpoints: [],
@@ -1442,7 +1481,9 @@ app.registerExtension({
                         && clips.some(entry => ccKind(entry) === "anima")
                         && vaes.some(entry => ccKind(entry) === "anima");
                     const hasIllustrious = models.some(entry => ccKind(entry) === "illustrious" && ccType(entry) === "checkpoint");
-                    return hasAnima && hasIllustrious;
+                    const isQwenKind = entry => ["qi2", "qwenimage21"].includes(ccKind(entry));
+                    const hasQwen = models.some(isQwenKind) && clips.some(isQwenKind) && vaes.some(isQwenKind);
+                    return hasAnima && hasIllustrious && hasQwen;
                 };
                 const ccDownloadEntry = async (cat, entry) => {
                     if (!entry?.name) return;
@@ -1528,7 +1569,7 @@ app.registerExtension({
                 };
 
                 const getGenerationDefaults = (mode) => ({
-                    ...(mode === "anima" ? ANIMA_DEFAULTS : ILLUSTRIOUS_DEFAULTS),
+                    ...(mode === "anima" ? ANIMA_DEFAULTS : mode === "qwen_image_2_1" ? QWEN_IMAGE21_DEFAULTS : ILLUSTRIOUS_DEFAULTS),
                     seed: 0,
                 });
 
@@ -1555,10 +1596,10 @@ app.registerExtension({
                     const defaults = getGenerationDefaults(normalizedMode);
                     const existing = state.gen_settings.mode_settings[normalizedMode] || {};
                     const profile = { ...defaults, ...existing };
-                    if (normalizedMode === "anima") {
+                    if (normalizedMode === "anima" || normalizedMode === "qwen_image_2_1") {
                         profile.resolution_preset = normalizeAnimaResolutionPreset(profile.resolution_preset);
                     }
-                    if (normalizedMode === "illustrious" || normalizedMode === "anima") ensureLoraStack(profile);
+                    if (["illustrious", "anima", "qwen_image_2_1"].includes(normalizedMode)) ensureLoraStack(profile);
                     state.gen_settings.mode_settings[normalizedMode] = profile;
                     return profile;
                 };
@@ -1571,7 +1612,7 @@ app.registerExtension({
                             profile[key] = cloneSettingsValue(state.gen_settings[key]);
                         }
                     });
-                    if (normalizedMode === "illustrious" || normalizedMode === "anima") ensureLoraStack(profile);
+                    if (["illustrious", "anima", "qwen_image_2_1"].includes(normalizedMode)) ensureLoraStack(profile);
                 };
 
                 const applyGenerationProfile = (mode) => {
@@ -1580,7 +1621,7 @@ app.registerExtension({
                     (MODE_SETTING_KEYS[normalizedMode] || []).forEach((key) => {
                         state.gen_settings[key] = cloneSettingsValue(profile[key]);
                     });
-                    if (normalizedMode === "illustrious" || normalizedMode === "anima") ensureLoraStack(state.gen_settings);
+                    if (["illustrious", "anima", "qwen_image_2_1"].includes(normalizedMode)) ensureLoraStack(state.gen_settings);
                 };
 
                 const syncGenerationControls = () => {
@@ -1641,16 +1682,18 @@ app.registerExtension({
                     g.mode_settings = {
                         illustrious: { ...getGenerationDefaults("illustrious"), ...(existingModes.illustrious || {}) },
                         anima: { ...getGenerationDefaults("anima"), ...(existingModes.anima || {}) },
+                        qwen_image_2_1: { ...getGenerationDefaults("qwen_image_2_1"), ...(existingModes.qwen_image_2_1 || {}) },
                     };
                     ensureLoraStack(g.mode_settings.illustrious);
                     ensureLoraStack(g.mode_settings.anima);
+                    ensureLoraStack(g.mode_settings.qwen_image_2_1);
 
                     if ((g.generation_defaults_version || 0) < GENERATION_DEFAULTS_VERSION || !existingModes[currentMode]) {
                         const target = g.mode_settings[currentMode];
                         (MODE_SETTING_KEYS[currentMode] || []).forEach((key) => {
                             if (g[key] !== undefined && g[key] !== "") target[key] = cloneSettingsValue(g[key]);
                         });
-                        if (currentMode === "illustrious" || currentMode === "anima") ensureLoraStack(target);
+                        if (["illustrious", "anima", "qwen_image_2_1"].includes(currentMode)) ensureLoraStack(target);
                     }
 
                     g.generation_defaults_version = GENERATION_DEFAULTS_VERSION;
@@ -1949,6 +1992,7 @@ app.registerExtension({
                     const mergedModes = {
                         illustrious: { ...MODE_PROMPT_DEFAULTS.illustrious, ...(existingModes.illustrious || {}) },
                         anima: { ...MODE_PROMPT_DEFAULTS.anima, ...(existingModes.anima || {}) },
+                        qwen_image_2_1: { ...MODE_PROMPT_DEFAULTS.qwen_image_2_1, ...(existingModes.qwen_image_2_1 || {}) },
                     };
 
                     if ((state.prompt_defaults_version || 0) < PROMPT_DEFAULTS_VERSION) {
@@ -1965,12 +2009,12 @@ app.registerExtension({
 
                 const applyGenerationDefaults = (mode, force = false) => {
                     const defaults = getGenerationDefaults(mode);
-                    const markerKey = mode === "anima" ? "anima_defaults_applied" : "illustrious_defaults_applied";
+                    const markerKey = mode === "anima" ? "anima_defaults_applied" : mode === "qwen_image_2_1" ? "qwen_image_2_1_defaults_applied" : "illustrious_defaults_applied";
                     if (!force && state.gen_settings[markerKey]) return;
 
                     state.gen_settings.mode_settings[mode] = {
                         ...defaults,
-                        ...(["illustrious", "anima"].includes(mode) ? { lora_stack: cloneSettingsValue(defaults.lora_stack) } : {}),
+                        ...(["illustrious", "anima", "qwen_image_2_1"].includes(mode) ? { lora_stack: cloneSettingsValue(defaults.lora_stack) } : {}),
                     };
                     if (mode === state.gen_settings.generation_mode) {
                         applyGenerationProfile(mode);
@@ -1983,21 +2027,24 @@ app.registerExtension({
                 const refreshGenerationModeUI = () => {
                     const mode = (state.gen_settings.generation_mode || "illustrious").toLowerCase();
                     const isAnima = mode === "anima";
+                    const isQwen = mode === "qwen_image_2_1";
+                    const hasPortraitResolution = isAnima || isQwen;
                     if (els.modeTabs) {
                         Object.entries(els.modeTabs).forEach(([key, btn]) => {
                             btn.classList.toggle("is-active", key === mode);
                         });
                     }
-                    if (els.illustriousModels) els.illustriousModels.style.display = isAnima ? "none" : "flex";
+                    if (els.illustriousModels) els.illustriousModels.style.display = mode === "illustrious" ? "flex" : "none";
                     if (els.animaModels) els.animaModels.style.display = isAnima ? "flex" : "none";
-                    if (els.animaResolutionWrap) els.animaResolutionWrap.style.display = isAnima ? "flex" : "none";
+                    if (els.qwenModels) els.qwenModels.style.display = isQwen ? "flex" : "none";
+                    if (els.animaResolutionWrap) els.animaResolutionWrap.style.display = hasPortraitResolution ? "flex" : "none";
                     if (els.loraSection) els.loraSection.style.display = "flex";
                     if (els.dmdWrap) els.dmdWrap.style.display = "none";
                     if (els.dmdLabel) els.dmdLabel.innerText = isAnima ? "Turbo LoRA" : "DMD2 LoRA Model";
-                    if (els.loraHeader) els.loraHeader.innerText = isAnima ? "ANIMA LoRA Stack" : "LoRa Stack";
+                    if (els.loraHeader) els.loraHeader.innerText = isAnima ? "ANIMA LoRA Stack" : isQwen ? "Qwen Image 2.1 LoRA Stack" : "LoRa Stack";
                     if (els.ageWrap) els.ageWrap.style.display = "none";
                     if (els.animaLoraCards) els.animaLoraCards.style.display = isAnima && els.animaLoraCards.children.length ? "flex" : "none";
-                    if (els.illustriousLoraCards) els.illustriousLoraCards.style.display = !isAnima && els.illustriousLoraCards.children.length ? "flex" : "none";
+                    if (els.illustriousLoraCards) els.illustriousLoraCards.style.display = mode === "illustrious" && els.illustriousLoraCards.children.length ? "flex" : "none";
                 };
 
                 const setGenerationMode = (mode) => {
@@ -2057,7 +2104,7 @@ app.registerExtension({
                     eyes: "Eye color and eye-shape tags used in the character prompt.",
                     additional_details: "Extra persistent character traits that should appear across outfits and emotions.",
                     aesthetics: "Visual style notes for the character, such as mood, fashion direction, or rendering flavor.",
-                    generation_mode: "Chooses the generation backend profile. Illustrious uses checkpoint-style generation; Anima uses the Qwen/Anima stack.",
+                    generation_mode: "Chooses the generation backend profile. Illustrious uses checkpoint-style generation; Anima and Qwen Image 2.1 use diffusion-model, text-encoder, and VAE stacks.",
                     resolution_preset: "Sets the portrait generation resolution for Anima. Higher presets use more VRAM and take longer to generate.",
                     ckpt_name: "Checkpoint used for Illustrious generation.",
                     diffusion_model_name: "Diffusion model used for Anima generation.",
@@ -2447,6 +2494,28 @@ app.registerExtension({
                         els.vae_name.value = state.gen_settings.vae_name || "";
                     }
                 };
+                const qwenKind = entry => ["qi2", "qwenimage21"].includes(ccKind(entry));
+                const qwenEntries = (section, predicate = null) => (ccConfig?.[section] || []).filter(entry =>
+                    qwenKind(entry) && (!predicate || predicate(entry))
+                );
+                const ensureQwenDefaultAux = () => {
+                    const clip = qwenEntries("clip")[0];
+                    const vae = qwenEntries("vae")[0];
+                    if (clip) state.gen_settings.clip_name = ccRelPath(clip);
+                    if (vae) state.gen_settings.vae_name = ccRelPath(vae);
+                    state.gen_settings.clip_type = "qwen_image";
+                    state.gen_settings.turbo_enabled = false;
+                    state.gen_settings.dmd_lora_name = "";
+                    state.gen_settings.age_lora_name = "";
+                    if (els.clip_name) {
+                        ensureOption(els.clip_name, state.gen_settings.clip_name);
+                        els.clip_name.value = state.gen_settings.clip_name || "";
+                    }
+                    if (els.vae_name) {
+                        ensureOption(els.vae_name, state.gen_settings.vae_name);
+                        els.vae_name.value = state.gen_settings.vae_name || "";
+                    }
+                };
 
                 const selectAnimaModel = (rel) => {
                     ensureAnimaDefaultAux();
@@ -2459,6 +2528,12 @@ app.registerExtension({
                     selectCcAsset("ckpt_name", rel);
                 };
 
+                const selectQwenModel = (rel) => {
+                    ensureQwenDefaultAux();
+                    modelPickerOpen.qwen_image_2_1 = false;
+                    selectCcAsset("diffusion_model_name", rel);
+                };
+
                 const downloadAnimaBundle = async (cat, entry) => {
                     ensureAnimaDefaultAux();
                     await ccDownloadEntry(cat, entry);
@@ -2466,6 +2541,17 @@ app.registerExtension({
                     const vae = ccFirstEntry("vae", "Anima");
                     if (clip && ccResolveStatus(clip, "clip") !== "installed") await ccDownloadEntry("clip", clip);
                     if (vae && ccResolveStatus(vae, "vae") !== "installed") await ccDownloadEntry("vae", vae);
+                };
+
+                const downloadQwenBundle = async (cat, entry) => {
+                    await ccDownloadEntry(cat, entry);
+                    for (const [section, category] of [["clip", "clip"], ["vae", "vae"]]) {
+                        const dependency = qwenEntries(section)[0];
+                        if (dependency && ccResolveStatus(dependency, category) !== "installed") {
+                            await ccDownloadEntry(category, dependency);
+                        }
+                    }
+                    ensureQwenDefaultAux();
                 };
 
                 const setCcTurboMode = (enabled, rel) => {
@@ -2643,15 +2729,12 @@ app.registerExtension({
                 };
 
                 const renderControlCenterCards = () => {
-                    if (!els.animaModelCards && !els.illustriousModelCards) return;
+                    if (!els.animaModelCards && !els.illustriousModelCards && !els.qwenModelCards) return;
                     const currentMode = (state.gen_settings.generation_mode || "illustrious").toLowerCase();
-                    const isAnimaMode = currentMode === "anima";
                     if (els.animaFallback) {
                         els.animaFallback.style.display = "none";
                     }
-                    [els.animaModelCards].forEach(containerEl => {
-                        if (containerEl) containerEl.style.display = "flex";
-                    });
+                    if (els.animaModelCards) els.animaModelCards.style.display = currentMode === "anima" ? "flex" : "none";
 
                     const animaModels = mergeCcAndLocalEntries(
                         ccEntries("models", "Anima", entry => ccType(entry) === "unet"),
@@ -2671,20 +2754,14 @@ app.registerExtension({
                         onDownload: downloadAnimaBundle,
                     });
 
-                    const installedAnimaDefaults = [
-                        ["diffusion_model_name", animaModels, "models"],
-                    ];
-                    installedAnimaDefaults.forEach(([key, entries, cat]) => {
-                        const current = String(state.gen_settings[key] || "").replace(/\\/g, "/");
-                        const firstEntry = entries[0];
-                        if (!current && firstEntry && ccConfig) {
-                            selectAnimaModel(ccRelPath(firstEntry));
-                        }
-                    });
-                    ensureAnimaDefaultAux();
+                    if (currentMode === "anima") {
+                        const current = String(state.gen_settings.diffusion_model_name || "").replace(/\\/g, "/");
+                        if (!current && animaModels[0] && ccConfig) selectAnimaModel(ccRelPath(animaModels[0]));
+                        ensureAnimaDefaultAux();
+                    }
 
                     if (els.animaLoraCards) {
-                        if (!isAnimaMode) {
+                        if (currentMode !== "anima") {
                             els.animaLoraCards.innerHTML = "";
                             els.animaLoraCards.style.display = "none";
                         } else {
@@ -2692,7 +2769,7 @@ app.registerExtension({
                         }
                     }
                     if (els.illustriousLoraCards) {
-                        if (isAnimaMode) {
+                        if (currentMode !== "illustrious") {
                             els.illustriousLoraCards.innerHTML = "";
                             els.illustriousLoraCards.style.display = "none";
                         } else {
@@ -2728,16 +2805,34 @@ app.registerExtension({
                                 emptyText: "No Illustrious checkpoints found.",
                                 onSelect: rel => selectIllustriousModel(rel),
                             });
-                            els.illustriousModelCards.style.display = "flex";
+                            els.illustriousModelCards.style.display = currentMode === "illustrious" ? "flex" : "none";
                         } else {
                             els.illustriousFallback.style.display = "none";
-                            els.illustriousModelCards.style.display = "flex";
+                            els.illustriousModelCards.style.display = currentMode === "illustrious" ? "flex" : "none";
                             const empty = document.createElement("div");
                             empty.className = "vnccs-model-card-desc";
                             empty.textContent = "No checkpoints found.";
                             els.illustriousModelCards.appendChild(empty);
                         }
                     }
+
+                    const qwenModels = qwenEntries("models", entry => ["unet", "gguf"].includes(ccType(entry)));
+                    renderModelPicker({
+                        containerEl: els.qwenModelCards,
+                        entries: qwenModels,
+                        cat: "models",
+                        key: "diffusion_model_name",
+                        mode: "qwen_image_2_1",
+                        emptyText: "No Qwen Image 2.1 diffusion models found.",
+                        onSelect: rel => selectQwenModel(rel),
+                        onDownload: downloadQwenBundle,
+                    });
+                    if (currentMode === "qwen_image_2_1") {
+                        const current = String(state.gen_settings.diffusion_model_name || "").replace(/\\/g, "/");
+                        if (!current && qwenModels[0] && ccConfig) selectQwenModel(ccRelPath(qwenModels[0]));
+                        ensureQwenDefaultAux();
+                    }
+                    if (els.qwenModelCards) els.qwenModelCards.style.display = currentMode === "qwen_image_2_1" ? "flex" : "none";
                 };
 
                 const isSelectedCcAssetInstalled = (section, kind, key, predicate = null) => {
@@ -3279,6 +3374,7 @@ app.registerExtension({
                 [
                     ["illustrious", "Illustrious"],
                     ["anima", "ANIMA"],
+                    ["qwen_image_2_1", "Qwen Image 2.1"],
                 ].forEach(([value, label]) => {
                     const btn = document.createElement("button");
                     btn.type = "button";
@@ -3334,6 +3430,15 @@ app.registerExtension({
                 hiddenAnimaSelects.appendChild(makeFallbackSelect("VAE", "vae_name"));
                 animaModels.appendChild(hiddenAnimaSelects);
                 colRight.appendChild(animaModels);
+
+                const qwenModels = document.createElement("div");
+                qwenModels.className = "vnccs-subsection";
+                els.qwenModels = qwenModels;
+                const qwenModelCards = document.createElement("div");
+                qwenModelCards.className = "vnccs-model-card-list";
+                els.qwenModelCards = qwenModelCards;
+                qwenModels.appendChild(qwenModelCards);
+                colRight.appendChild(qwenModels);
 
                 const animaResolutionWrap = createCompactSelectField("Resolution", "resolution_preset", state.gen_settings);
                 animaResolutionWrap.classList.add("vnccs-anima-resolution");
@@ -3721,6 +3826,10 @@ app.registerExtension({
                                     aesthetics: MODE_PROMPT_DEFAULTS.anima.aesthetics,
                                     negative_prompt: MODE_PROMPT_DEFAULTS.anima.negative_prompt,
                                 },
+                                qwen_image_2_1: {
+                                    aesthetics: MODE_PROMPT_DEFAULTS.qwen_image_2_1.aesthetics,
+                                    negative_prompt: MODE_PROMPT_DEFAULTS.qwen_image_2_1.negative_prompt,
+                                },
                             };
                             state.prompt_defaults_version = PROMPT_DEFAULTS_VERSION;
                             applyPromptModeToFields((state.gen_settings.generation_mode || "illustrious").toLowerCase());
@@ -3773,6 +3882,22 @@ app.registerExtension({
                         }
                         if (!isSelectedCcAssetInstalled("vae", "Anima", "vae_name")) {
                             showAlertModal("Model Missing", "Download and select an installed Anima VAE");
+                            return;
+                        }
+                    } else if (mode === "qwen_image_2_1") {
+                        if (!state.gen_settings.diffusion_model_name) { showAlertModal("Missing Model", "Select a Qwen Image 2.1 diffusion model"); return; }
+                        if (!state.gen_settings.clip_name) { showAlertModal("Missing Model", "Select the Qwen Image 2.1 text encoder"); return; }
+                        if (!state.gen_settings.vae_name) { showAlertModal("Missing Model", "Select the Qwen Image 2.1 VAE"); return; }
+                        if (!isSelectedCcAssetInstalled("models", null, "diffusion_model_name", entry => qwenKind(entry) && ["unet", "gguf"].includes(ccType(entry)))) {
+                            showAlertModal("Model Missing", "Download and select an installed Qwen Image 2.1 diffusion model");
+                            return;
+                        }
+                        if (!isSelectedCcAssetInstalled("clip", null, "clip_name", entry => qwenKind(entry))) {
+                            showAlertModal("Model Missing", "Download and select the installed Qwen Image 2.1 text encoder");
+                            return;
+                        }
+                        if (!isSelectedCcAssetInstalled("vae", null, "vae_name", entry => qwenKind(entry))) {
+                            showAlertModal("Model Missing", "Download and select the installed Qwen Image 2.1 VAE");
                             return;
                         }
                     } else if (!state.gen_settings.ckpt_name) {

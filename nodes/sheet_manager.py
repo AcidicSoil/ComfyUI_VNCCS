@@ -172,7 +172,7 @@ class VNCCSSheetManager:
                 image.unsqueeze(0).permute(0, 3, 1, 2), 
                 size=(target_inner_height, target_inner_width), 
                 mode="bilinear"
-            ).squeeze().permute(1, 2, 0)
+            ).squeeze(0).permute(1, 2, 0)
             
             row = idx // num_columns
             col = idx % num_columns

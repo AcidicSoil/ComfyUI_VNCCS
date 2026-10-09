@@ -2457,8 +2457,10 @@ class VNCCS_CharacterGenerator:
             return self._h3_first_frame_to_cpu(decoded) if is_h3 else decoded
         finally:
             if sampler_model is not pipe_values["model"]:
-                sampler_model.detach()
-                sampler_model.cleanup()
+                for method_name in ("detach", "cleanup"):
+                    cleanup = getattr(sampler_model, method_name, None)
+                    if callable(cleanup):
+                        cleanup()
 
     def _run_upscaler_models(self, settings, node_id=None):
         defaults = DEFAULT_WIDGET_DATA["upscaler"]
@@ -4333,7 +4335,8 @@ class VNCCS_EmotionsGenerator(VNCCS_CharacterGenerator):
             if alpha.shape != rgb_arr.shape[:2]:
                 alpha = np.array(Image.fromarray(alpha).resize((rgb_arr.shape[1], rgb_arr.shape[0]), Image.Resampling.LANCZOS))
 
-        Image.fromarray(np.dstack([rgb_arr[..., :3], alpha]), mode="RGBA").save(path, format="PNG")
+        with atomic_output_path(path) as temporary:
+            Image.fromarray(np.dstack([rgb_arr[..., :3], alpha]), mode="RGBA").save(temporary, format="PNG")
         return path
 
     def _run_emotion_generation_one(

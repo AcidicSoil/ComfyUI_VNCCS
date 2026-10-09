@@ -2349,7 +2349,13 @@ def _build_control_center_pipe(
     else:
         compatible_clips = _filter_entries_by_kind(config.get("clip", []), model_kind)
         compatible_vaes = _filter_entries_by_kind(config.get("vae", []), model_kind)
-        all_clip_names = [entry["name"] for entry in compatible_clips]
+        # QI2 and Klein require a single architecture-compatible text encoder.
+        # Loading every family-matched encoder also loads unrelated local models.
+        if model_kind in {"qi2", "klein9b"}:
+            selected_clip = _prefer_installed_model(compatible_clips)
+            all_clip_names = [selected_clip["name"]] if selected_clip else []
+        else:
+            all_clip_names = [entry["name"] for entry in compatible_clips]
         if model_kind == "minimaxh3":
             video_vaes = [entry for entry in compatible_vaes if not _is_audio_vae_entry(entry)]
             audio_vaes = [entry for entry in compatible_vaes if _is_audio_vae_entry(entry)]
@@ -2358,10 +2364,13 @@ def _build_control_center_pipe(
                     "[VNCCS Control Center] MiniMax H3 requires both video and audio VAE entries. "
                     "Mark the audio entry with vae_role='audio', role='audio', or type='AudioVAE'."
                 )
-            first_vae_name = video_vaes[0]["name"]
-            selected_audio_vae_name = audio_vaes[0]["name"]
+            preferred_video = _prefer_installed_model(video_vaes)
+            preferred_audio = _prefer_installed_model(audio_vaes)
+            first_vae_name = preferred_video["name"] if preferred_video else ""
+            selected_audio_vae_name = preferred_audio["name"] if preferred_audio else ""
         else:
-            first_vae_name = compatible_vaes[0]["name"] if compatible_vaes else ""
+            selected_vae = _prefer_installed_model(compatible_vaes)
+            first_vae_name = selected_vae["name"] if selected_vae else ""
     model, clip, vae = _load_model_block(
         model_entry,
         selected_type,

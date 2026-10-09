@@ -752,7 +752,7 @@ def resolve_installed_generation_assets(gen_settings):
 
     family = "QI2" if mode == "qi2" else "Anima"
     specs = (
-        ("diffusion_model_name", "models", {"unet"}, None),
+        ("diffusion_model_name", "models", {"unet", "gguf"} if mode == "qi2" else {"unet"}, None),
         ("clip_name", "clip", None, None),
         ("vae_name", "vae", None, None),
     )
@@ -877,8 +877,23 @@ def load_anima_assets(gen_settings):
     if not vae_name:
         raise ValueError(f"No VAE selected in Character Creator V2 {profile_label} mode")
 
-    model = None
-    if model is None:
+    if str(diffusion_model_name).lower().endswith('.gguf'):
+        if generation_mode != 'qi2':
+            raise ValueError('GGUF split-model generation is only supported for Qwen Image 2.1')
+        try:
+            model = _call_loader_node(
+                ['UnetLoaderGGUF'], ['load_unet'], unet_name=diffusion_model_name,
+            )
+        except ValueError as exc:
+            if 'Unexpected architecture type' in str(exc):
+                raise RuntimeError(
+                    'Installed GGUF loader does not support Qwen Image 2.1; '
+                    'install a compatible ComfyUI-GGUF loader.'
+                ) from exc
+            raise
+        if model is None:
+            raise RuntimeError('Qwen Image 2.1 GGUF loader (UnetLoaderGGUF) is not installed')
+    else:
         model = _call_loader_node(
             ["UNETLoader", "Load Diffusion Model"],
             ["load_unet", "load_model", "load_diffusion_model"],
@@ -887,10 +902,10 @@ def load_anima_assets(gen_settings):
             diffusion_model_name=diffusion_model_name,
             weight_dtype="default",
         )
-    if model is None and hasattr(comfy.sd, "load_diffusion_model"):
-        diffusion_model_path = get_full_path_agnostic(folder_paths, "diffusion_models", diffusion_model_name)
-        if diffusion_model_path:
-            model = comfy.sd.load_diffusion_model(diffusion_model_path)
+        if model is None and hasattr(comfy.sd, "load_diffusion_model"):
+            diffusion_model_path = get_full_path_agnostic(folder_paths, "diffusion_models", diffusion_model_name)
+            if diffusion_model_path:
+                model = comfy.sd.load_diffusion_model(diffusion_model_path)
 
     clip = load_generation_clip(gen_settings)
 

@@ -938,7 +938,11 @@ def _local_model_family(rel_path, default_type, full_path=None):
     ext = os.path.splitext(filename)[1]
     model_type = "gguf" if ext == ".gguf" else default_type
 
-    if "anima" in identity:
+    # Match the Anima family as a directory or a filename prefix. A plain
+    # substring also matches Wan 'Animate' video models by mistake.
+    basename = normalized.rsplit('/', 1)[-1]
+    named_anima = re.match(r'(?i:anima)(?:[A-Z0-9_.-]|$)', basename) is not None
+    if 'anima' in parent_parts or named_anima:
         return "Anima", model_type
     if default_type == "checkpoint" and ("illustrious" in identity or any(part in {"ill", "illustrious"} for part in parent_parts)):
         return "Illustrious", model_type

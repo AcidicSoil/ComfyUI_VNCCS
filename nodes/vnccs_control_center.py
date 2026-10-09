@@ -1131,28 +1131,49 @@ def _entry_role(entry):
     return ""
 
 
-def _direct_asset_exists(section, selected):
+def _registered_asset_path(section, selected):
+    """Return ComfyUI's canonical registered relative path for an exact selection."""
     selected = str(selected or "").replace("\\", "/").strip("/")
     if not selected:
-        return False
+        return ""
     folder_keys = {
-        "models": ("diffusion_models", "unet", "unet_gguf"),
+        "models": ("diffusion_models", "unet", "unet_gguf", "checkpoints"),
         "clip": ("text_encoders",),
         "vae": ("vae",),
         "lora": ("loras",),
     }.get(section, ())
+    wanted = selected.lower()
     for folder_key in folder_keys:
-        if get_full_path_agnostic(folder_paths, folder_key, selected, require_exists=True):
-            return True
-    return False
+        try:
+            registered = folder_paths.get_filename_list(folder_key) or []
+        except Exception:
+            continue
+        for value in registered:
+            canonical = str(value or "").replace("\\", "/").strip("/")
+            if canonical.lower() == wanted:
+                return canonical
+    return ""
+
+
+def _direct_asset_exists(section, selected):
+    return bool(_registered_asset_path(section, selected))
 
 
 def _resolve_family_asset(config, section, kind, selected="", entry_types=None, role=None):
     """Resolve an installed asset by family/capability instead of an exact filename."""
     selected = str(selected or "").replace("\\", "/").strip("/")
-    if selected and _direct_asset_exists(section, selected):
-        return selected
+    direct = _registered_asset_path(section, selected) if selected else ""
+    if direct:
+        return direct
 
+    selected_full = ""
+    if selected:
+        selected_full, selected_exists = _find_model_on_disk(selected)
+        if not selected_exists:
+            selected_full = ""
+    selected_identity = (
+        os.path.normcase(os.path.abspath(selected_full)) if selected_full else ""
+    )
     wanted_kind = _normalize_model_kind(kind)
     wanted_types = {str(value).strip().lower() for value in (entry_types or set()) if str(value).strip()}
     wanted_role = str(role or "").strip().lower()
@@ -1170,7 +1191,12 @@ def _resolve_family_asset(config, section, kind, selected="", entry_types=None, 
         full_path, exists = _find_model_on_disk(entry.get("local_path", ""))
         if not exists or not rel:
             continue
-        if selected and (selected == rel or selected.lower() == str(entry.get("name", "")).strip().lower()):
+        candidate_identity = os.path.normcase(os.path.abspath(full_path)) if full_path else ""
+        if selected and (
+            selected == rel
+            or selected.lower() == str(entry.get("name", "")).strip().lower()
+            or (selected_identity and candidate_identity == selected_identity)
+        ):
             return rel
         candidates.append((entry, rel, full_path))
 

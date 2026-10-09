@@ -444,6 +444,44 @@ class TestLocalGenerationAssetDiscovery:
         assert _aux_asset_family("vae", "minimax_h3_video_vae_fp16.safetensors")["kind"] == "MiniMaxH3"
         assert _aux_asset_family("lora", "MiniMaxH3/VNCCS/VNCCS_ClothesCoreMiniMaxH3V1.safetensors")["role"] == "clothes"
 
+    def test_resolver_canonicalizes_stale_basename_to_registered_subdirectory(self, monkeypatch):
+        config = {
+            "models": [{
+                "name": "Anima Base v1.0", "kind": "Anima", "type": "unet",
+                "local_path": "models/diffusion_models/anima/anima-base-v1.0.safetensors",
+            }],
+            "clip": [{
+                "name": "Anima Qwen 3 0.6B Text Encoder", "kind": "Anima", "type": "TextEncoder",
+                "local_path": "models/text_encoders/anima/qwen_3_06b_base.safetensors",
+            }],
+            "vae": [], "lora": [],
+        }
+        registered = {
+            "diffusion_models": [r"anima\anima-base-v1.0.safetensors"],
+            "text_encoders": [r"anima\qwen_3_06b_base.safetensors"],
+        }
+        monkeypatch.setattr(
+            _CONTROL_CENTER_MODULE.folder_paths, "get_filename_list",
+            lambda key: registered.get(key, []),
+        )
+        paths = {
+            "models/diffusion_models/anima/anima-base-v1.0.safetensors": r"E:\models\diffusion_models\anima\anima-base-v1.0.safetensors",
+            "anima-base-v1.0.safetensors": r"E:\models\diffusion_models\anima\anima-base-v1.0.safetensors",
+            "models/text_encoders/anima/qwen_3_06b_base.safetensors": r"E:\models\text_encoders\anima\qwen_3_06b_base.safetensors",
+            "qwen_3_06b_base.safetensors": r"E:\models\text_encoders\anima\qwen_3_06b_base.safetensors",
+        }
+        monkeypatch.setattr(
+            _CONTROL_CENTER_MODULE, "_find_model_on_disk",
+            lambda path: (paths.get(path, ""), path in paths),
+        )
+
+        assert _resolve_family_asset(
+            config, "models", "Anima", "anima-base-v1.0.safetensors", entry_types={"unet"}
+        ) == "anima/anima-base-v1.0.safetensors"
+        assert _resolve_family_asset(
+            config, "clip", "Anima", "qwen_3_06b_base.safetensors"
+        ) == "anima/qwen_3_06b_base.safetensors"
+
     def test_resolver_replaces_missing_hardcoded_qi2_assets_with_installed_family_matches(self, monkeypatch):
         config = {
             "models": [{"name": "qwenImage21Turbo8_v10.safetensors", "kind": "QI2", "type": "unet", "local_path": "models/diffusion_models/qwenImage21Turbo8_v10.safetensors", "local": True}],

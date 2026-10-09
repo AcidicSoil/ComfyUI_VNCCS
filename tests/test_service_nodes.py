@@ -90,11 +90,11 @@ def test_service_anima_settings_select_diffusion_model():
     normalized = normalize_gen_settings(settings)
 
     assert settings["generation_mode"] == "anima"
-    assert settings["diffusion_model_name"] == "anima-base-v1.0.safetensors"
-    assert settings["mode_settings"]["anima"]["diffusion_model_name"] == "anima-base-v1.0.safetensors"
-    assert normalized["diffusion_model_name"] == "anima-base-v1.0.safetensors"
-    assert settings["clip_name"] == "qwen_3_06b_base.safetensors"
-    assert settings["vae_name"] == "qwen_image_vae.safetensors"
+    assert settings["diffusion_model_name"] == ""
+    assert settings["mode_settings"]["anima"]["diffusion_model_name"] == ""
+    assert normalized["diffusion_model_name"] == ""
+    assert settings["clip_name"] == ""
+    assert settings["vae_name"] == ""
     assert settings["steps"] == 12
     assert settings["cfg"] == 1
     assert settings["turbo_enabled"] is True

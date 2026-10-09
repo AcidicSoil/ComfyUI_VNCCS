@@ -55,8 +55,8 @@ function setup(saved) {
         setCcTurboMode() {}, setCcAgeLora() {},
     });
     vm.runInContext(
-        block("const QI2_OVERHAUL_LORA_NAME", "// --- STYLES") +
-        block("const ANIMA_TURBO_LORA_NAME", "const MODE_PROMPT_DEFAULTS") +
+        block("const QI2_OVERHAUL_TITLE", "// --- STYLES") +
+        block("const ILLUSTRIOUS_DEFAULTS", "const MODE_PROMPT_DEFAULTS") +
         block("const cloneSettingsValue", "const syncGenerationControls") +
         block("const migrateGenerationModeSettings", "const clearPreviewHandlers") +
         block("const syncBackgroundForGenerationMode", "const clearCharacterSelection") +

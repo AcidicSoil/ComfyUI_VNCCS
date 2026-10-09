@@ -4,11 +4,10 @@ import { vnccsApi as api, mediaURL, checkedJSON, storage, serverRegistry, refres
 import { presetGroups, presetSelection } from "./character_presets.mjs";
 import { debounce, registerCleanup, injectStyles, showModal as showCommonModal, createLoadingOverlay, showMessage, generateRandomSeed, syncDOMWidgetWidth, syncDOMWidgetWidthSoon, enableMiddleMouseCanvasPan, attachHelpTooltips, setHelpText, createRequestGuard } from "./vnccs_common.js";
 
-const QI2_OVERHAUL_LORA_NAME = "QI2.1/VNCCS/VNCCS_QI2_AnimeOverhaulV1.safetensors";
 const QI2_OVERHAUL_TITLE = "Qwen Image2.1 Character Overhaul";
 const QI2_OVERHAUL_ENTRY = {
-    name: "VNCCS Overhaul QI2", type: "Helper", kind: "QI2",
-    local_path: `models/loras/${QI2_OVERHAUL_LORA_NAME}`,
+    name: "VNCCS Overhaul QI2", type: "Helper", kind: "QI2", role: "overhaul",
+    local_path: "",
     description: "Overhaul for Character Creator",
 };
 const normalizeOverhaulStrength = value => {
@@ -1567,12 +1566,12 @@ app.registerExtension({
                                 ]
                             },
                             anima: {
-                                diffusion_model_name: "", clip_name: "qwen_3_06b_base.safetensors", vae_name: "qwen_image_vae.safetensors",
+                                diffusion_model_name: "", clip_name: "", vae_name: "",
                                 target_size: 1024,
                                 sampler: "er_sde", scheduler: "simple",
                                 steps: 30, cfg: 4.0, seed: 0, seed_mode: "fixed",
                                 turbo_enabled: false,
-                                dmd_lora_name: "anima\\anima-turbo-lora-v0.1.safetensors",
+                                dmd_lora_name: "",
                                 dmd_lora_strength: 1.0,
                                 turbo_previous_settings: null,
                                 lora_stack: [
@@ -1584,15 +1583,15 @@ app.registerExtension({
                                 ]
                             },
                             qi2: {
-                                diffusion_model_name: "qwen_image_2.1_int8_convrot.safetensors",
-                                clip_name: "qwen3vl_8b_int8_convrot.safetensors",
-                                vae_name: "qwen_image_2.1_vae_bf16.safetensors",
+                                diffusion_model_name: "",
+                                clip_name: "",
+                                vae_name: "",
                                 target_size: 1024,
                                 clip_type: "qwen_image",
                                 sampler: "euler", scheduler: "simple",
                                 steps: 25, cfg: 3.0, seed: 0, seed_mode: "fixed",
                                 turbo_enabled: false,
-                                dmd_lora_name: "QI2/Viggle/Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r128.safetensors",
+                                dmd_lora_name: "",
                                 dmd_lora_strength: 1.0,
                                 turbo_previous_settings: null,
                                 qi2_overhaul_strength: 0.5,
@@ -1621,13 +1620,6 @@ app.registerExtension({
                 };
 
                 const debouncedSave = debounce(() => saveState(), 300);
-                const ANIMA_TURBO_LORA_NAME = "anima\\anima-turbo-lora-v0.1.safetensors";
-                const ANIMA_CLIP_NAME = "qwen_3_06b_base.safetensors";
-                const ANIMA_VAE_NAME = "qwen_image_vae.safetensors";
-                const QI2_TURBO_LORA_NAME = "QI2/Viggle/Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r128.safetensors";
-                const QI2_MODEL_NAME = "qwen_image_2.1_int8_convrot.safetensors";
-                const QI2_CLIP_NAME = "qwen3vl_8b_int8_convrot.safetensors";
-                const QI2_VAE_NAME = "qwen_image_2.1_vae_bf16.safetensors";
                 const ILLUSTRIOUS_DEFAULTS = {
                     target_size: 1024,
                     ckpt_name: "", sampler: "euler", scheduler: "normal",
@@ -1644,12 +1636,12 @@ app.registerExtension({
                     ]
                 };
                 const ANIMA_DEFAULTS = {
-                    diffusion_model_name: "", clip_name: ANIMA_CLIP_NAME, vae_name: ANIMA_VAE_NAME,
+                    diffusion_model_name: "", clip_name: "", vae_name: "",
                     target_size: 1024,
                     sampler: "er_sde", scheduler: "simple",
                     steps: 30, cfg: 4.0, seed: 0, seed_mode: "fixed",
                     turbo_enabled: false,
-                    dmd_lora_name: ANIMA_TURBO_LORA_NAME,
+                    dmd_lora_name: "",
                     dmd_lora_strength: 1.0,
                     turbo_previous_settings: null,
                     lora_stack: [
@@ -1661,13 +1653,13 @@ app.registerExtension({
                     ]
                 };
                 const QI2_DEFAULTS = {
-                    diffusion_model_name: QI2_MODEL_NAME, clip_name: QI2_CLIP_NAME, vae_name: QI2_VAE_NAME,
+                    diffusion_model_name: "", clip_name: "", vae_name: "",
                     target_size: 1024,
                     clip_type: "qwen_image",
                     sampler: "euler", scheduler: "simple",
                     steps: 25, cfg: 3.0, seed: 0, seed_mode: "fixed",
                     turbo_enabled: false,
-                    dmd_lora_name: QI2_TURBO_LORA_NAME,
+                    dmd_lora_name: "",
                     dmd_lora_strength: 1.0,
                     turbo_previous_settings: null,
                     qi2_overhaul_strength: 0.5,
@@ -1786,7 +1778,11 @@ app.registerExtension({
 
                     return merged;
                 };
-                const ccFirstEntry = (section, kind, predicate = null) => ccEntries(section, kind, predicate)[0] || null;
+                const ccFirstEntry = (section, kind, predicate = null) => {
+                    const entries = ccEntries(section, kind, predicate);
+                    const cat = section === "models" ? "models" : section;
+                    return entries.find(entry => ccResolveStatus(entry, cat) === "installed") || null;
+                };
                 const ccHasRequiredFamilies = (config) => {
                     const models = config?.models || [];
                     const clips = config?.clip || [];
@@ -2436,6 +2432,8 @@ app.registerExtension({
                     }
                     state.gen_settings.generation_mode = nextMode;
                     applyGenerationProfile(nextMode);
+                    if (nextMode === "anima") ensureAnimaDefaultAux();
+                    if (nextMode === "qi2") ensureQi2DefaultAux();
                     applyPromptModeToFields(nextMode);
                     syncGenerationControls();
                     refreshGenerationModeUI();
@@ -3076,10 +3074,8 @@ app.registerExtension({
                 const ensureAnimaDefaultAux = () => {
                     const clip = ccFirstEntry("clip", "Anima");
                     const vae = ccFirstEntry("vae", "Anima");
-                    if (clip) state.gen_settings.clip_name = ccRelPath(clip);
-                    else if (!state.gen_settings.clip_name) state.gen_settings.clip_name = ANIMA_CLIP_NAME;
-                    if (vae) state.gen_settings.vae_name = ccRelPath(vae);
-                    else if (!state.gen_settings.vae_name) state.gen_settings.vae_name = ANIMA_VAE_NAME;
+                    if (!localAssetHas("clip_name", state.gen_settings.clip_name)) state.gen_settings.clip_name = clip ? ccRelPath(clip) : "";
+                    if (!localAssetHas("vae_name", state.gen_settings.vae_name)) state.gen_settings.vae_name = vae ? ccRelPath(vae) : "";
                     if (els.clip_name) {
                         ensureOption(els.clip_name, state.gen_settings.clip_name);
                         els.clip_name.value = state.gen_settings.clip_name || "";
@@ -3093,8 +3089,8 @@ app.registerExtension({
                 const ensureQi2DefaultAux = () => {
                     const clip = ccFirstEntry("clip", "QI2");
                     const vae = ccFirstEntry("vae", "QI2");
-                    state.gen_settings.clip_name = clip ? ccRelPath(clip) : (state.gen_settings.clip_name || QI2_CLIP_NAME);
-                    state.gen_settings.vae_name = vae ? ccRelPath(vae) : (state.gen_settings.vae_name || QI2_VAE_NAME);
+                    if (!localAssetHas("clip_name", state.gen_settings.clip_name)) state.gen_settings.clip_name = clip ? ccRelPath(clip) : "";
+                    if (!localAssetHas("vae_name", state.gen_settings.vae_name)) state.gen_settings.vae_name = vae ? ccRelPath(vae) : "";
                     state.gen_settings.clip_type = "qwen_image";
                     state.gen_settings.qi2_cache = {
                         device: state.gen_settings.qi2_cache?.device || "gpu",
@@ -3147,6 +3143,8 @@ app.registerExtension({
 
                 const setCcTurboMode = (enabled, rel) => {
                     const mode = (state.gen_settings.generation_mode || "illustrious").toLowerCase();
+                    if (mode === "anima") ensureAnimaDefaultAux();
+                    if (mode === "qi2") ensureQi2DefaultAux();
                     if (mode === "anima" || mode === "qi2") {
                         state.gen_settings.dmd_lora_name = rel || state.gen_settings.dmd_lora_name || "";
                         setAnimaTurboMode(enabled);
@@ -3229,7 +3227,7 @@ app.registerExtension({
                     if (mode === "qi2") {
                         const entry = (ccConfig?.lora || []).find(item =>
                             ccKind(item) === "qi2" && ccType(item) === "helper"
-                            && (item.name === QI2_OVERHAUL_ENTRY.name || isCreatorOverhaulLora(ccRelPath(item)))
+                            && (item.role === "overhaul" || item.name === QI2_OVERHAUL_ENTRY.name || isCreatorOverhaulLora(ccRelPath(item)))
                         ) || QI2_OVERHAUL_ENTRY;
                         const installed = localAssetRelSet(localAssets.loras).has(ccRelPath(entry));
                         containerEl.appendChild(buildOverhaulCard(installed ? { ...entry, status: "installed" } : entry));
@@ -4484,21 +4482,12 @@ app.registerExtension({
                         ["diffusion_model_name", "clip_name", "vae_name"].forEach((key) => {
                             const ref = els[key];
                             if (!ref) return;
-                            if (key === "clip_name" && !animaProfile[key]) {
-                                animaProfile[key] = ANIMA_CLIP_NAME;
-                            }
-                            if (key === "vae_name" && !animaProfile[key]) {
-                                animaProfile[key] = ANIMA_VAE_NAME;
-                            }
                             if (key !== "diffusion_model_name" && !animaProfile[key] && ref.options.length > 0) {
                                 animaProfile[key] = ref.options[0].value;
                             }
                             ensureOption(ref, animaProfile[key]);
                         });
                         const qi2Profile = getModeProfile("qi2");
-                        if (!qi2Profile.diffusion_model_name) qi2Profile.diffusion_model_name = QI2_MODEL_NAME;
-                        if (!qi2Profile.clip_name) qi2Profile.clip_name = QI2_CLIP_NAME;
-                        if (!qi2Profile.vae_name) qi2Profile.vae_name = QI2_VAE_NAME;
                         applyGenerationProfile(g.generation_mode);
                         migratePromptModes();
 

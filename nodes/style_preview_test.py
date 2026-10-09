@@ -66,10 +66,6 @@ _MODE_PROMPT_DEFAULTS = {
         "negative_prompt": "bad quality, worst quality, low quality, blurry, jpeg artifacts",
     },
 }
-_MODEL_PREFERENCES = {
-    "anima": "anima-base-v1.0.safetensors",
-    "qi2": QI2_DEFAULTS["diffusion_model_name"],
-}
 _SUBFOLDER = "VNCCS/style_previews"
 _FIELD_TAG_GROUPS = {
     "race": ("races",),
@@ -258,18 +254,6 @@ def _analyze_breast_size(image):
     return generated
 
 
-def _select_diffusion_model(mode):
-    available = folder_paths.get_filename_list("diffusion_models")
-    preferred = _MODEL_PREFERENCES[mode]
-    for name in available:
-        if name.replace("\\", "/").casefold().endswith(preferred.casefold()):
-            return name
-    markers = ("anima",) if mode == "anima" else ("qwen_image_2.1", "qwen-image-2.1", "qi2")
-    for name in available:
-        if any(marker in name.casefold() for marker in markers) and "turbo" not in name.casefold():
-            return name
-    raise ValueError(f"No {mode.upper()} diffusion model found in ComfyUI diffusion_models")
-
 
 def _square_side(scale):
     scale = max(1.0, min(4.0, float(scale)))
@@ -362,7 +346,6 @@ class VNCCSStylePreviewTest:
         settings = normalize_gen_settings({
             **(ANIMA_DEFAULTS if mode == "anima" else QI2_DEFAULTS),
             "generation_mode": mode,
-            "diffusion_model_name": _select_diffusion_model(mode),
             "turbo_enabled": bool(turbo_enabled),
             "lora_stack": [],
         })

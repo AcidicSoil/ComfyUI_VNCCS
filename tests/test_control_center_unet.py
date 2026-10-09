@@ -12,19 +12,19 @@ from nodes import vnccs_control_center as cc
 
 
 MODEL = {
-    "name": cc.DEFAULT_QI2_MODEL,
+    "name": "Catalog QI2 Native",
     "type": "unet",
     "kind": "QI2",
-    "local_path": "models/diffusion_models/qwen_image_2.1_int8_convrot.safetensors",
+    "local_path": "models/diffusion_models/catalog-qi2.safetensors",
 }
-ALTERNATE = {**MODEL, "name": "Other native Qwen", "local_path": "models/unet/other.safetensors"}
+ALTERNATE = {**MODEL, "name": "Installed QI2 Native", "local_path": "models/unet/installed-qi2.safetensors"}
 LEGACY = {**MODEL, "name": "Qwen-Image-Edit-2511-GGUF-Q5", "type": "gguf", "kind": "QIE2511"}
 
 
 @pytest.mark.parametrize("state,expected", [
-    ({}, MODEL["name"]),
+    ({}, ALTERNATE["name"]),
     ({"active_kind": "QI2", "selected_type": "unet", "selected_model": ALTERNATE["name"]}, ALTERNATE["name"]),
-    ({"active_kind": "QI2", "selected_type": "gguf", "selected_model": LEGACY["name"]}, MODEL["name"]),
+    ({"active_kind": "QI2", "selected_type": "gguf", "selected_model": LEGACY["name"]}, ALTERNATE["name"]),
 ])
 def test_qi2_loads_native_unet(monkeypatch, state, expected):
     monkeypatch.setitem(sys.modules, "torch", ModuleType("torch"))
@@ -63,7 +63,7 @@ def test_legacy_selection_requires_explicit_qi2_choice(monkeypatch):
 
 def test_catalog_without_qi2_native_model_reports_missing_unet(monkeypatch):
     monkeypatch.setattr(cc, "_get_cc_config", lambda repo: {"models": [LEGACY]})
-    with pytest.raises(RuntimeError, match="No native QI2 UNet model"):
+    with pytest.raises(RuntimeError, match="No installed QI2 UNet model"):
         cc._build_control_center_pipe("test/repo", {"active_kind": "QI2"})
 
 
@@ -72,7 +72,7 @@ def test_custom_qi2_context_prefers_native_default():
         {"models": [LEGACY, ALTERNATE, MODEL]},
         {"selected_type": "custom", "active_kind": "QI2", "selected_model": LEGACY["name"]},
     )
-    assert context == MODEL
+    assert context == ALTERNATE
 
 
 def test_diffusion_model_paths_also_search_configured_unet_folders(monkeypatch, tmp_path):
@@ -101,9 +101,9 @@ def test_packaged_catalog_has_qi2_and_viggle_without_qie():
     catalog = json.loads((root / "control_center.json").read_text())
     assert not any(entry.get("kind") == "QIE2511" for entries in catalog.values() if isinstance(entries, list) for entry in entries if isinstance(entry, dict))
     qi2 = [entry for entry in catalog["models"] if entry.get("kind") == "QI2"]
-    assert qi2[0]["name"] == MODEL["name"]
-    assert qi2[0]["local_path"] == MODEL["local_path"]
-    assert qi2[0]["hf_repo"] == "Comfy-Org/Qwen-Image-2.1"
+    assert qi2
+    assert all(entry.get("type") == "unet" for entry in qi2)
+    assert any(entry.get("hf_repo") == "Comfy-Org/Qwen-Image-2.1" for entry in qi2)
     turbo = next(entry for entry in catalog["lora"] if entry.get("type") == "TurboLora" and entry.get("kind") == "QI2")
     assert turbo["hf_repo"] == "Viggle/Qwen-Image-2.1-viggle-turbo"
     assert turbo["hf_path"].endswith("v0.2.1-6step-lora-r128.safetensors")

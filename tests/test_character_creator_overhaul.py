@@ -21,15 +21,17 @@ creator = _preload_node("character_creator_v2")
 def test_installed_catalog_overhaul_is_loaded_instead_of_hardcoded_v1(monkeypatch, tmp_path, rel_path, legacy_installed):
     catalog_path = "models/loras/QI2.1/VNCCS/" + rel_path.replace("\\", "/").split("/")[-1]
     monkeypatch.setattr(control_center, "_get_cc_config", lambda repo: {"lora": [{
-        "name": "VNCCS Overhaul QI2", "local_path": catalog_path, "version": "1.2",
+        "name": "VNCCS Overhaul QI2", "kind": "QI2", "type": "Helper", "role": "overhaul",
+        "local_path": catalog_path, "version": "1.2",
     }]})
+    monkeypatch.setattr(control_center, "_apply_active_installed_paths", lambda value: value)
     monkeypatch.setattr(creator.folder_paths, "get_folder_paths", lambda category: [str(tmp_path)])
-    installed = tmp_path / rel_path.replace("\\", "/")
+    installed = tmp_path / "QI2.1" / "VNCCS" / rel_path.replace("\\", "/").split("/")[-1]
     installed.parent.mkdir(parents=True, exist_ok=True)
     installed.write_bytes(b"installed adapter")
     # Even with V1 present, the catalog's current version must win.
     if legacy_installed:
-        legacy = tmp_path / creator.QI2_OVERHAUL_LORA_NAME
+        legacy = tmp_path / "QI2.1/VNCCS/VNCCS_QI2_AnimeOverhaulV1.safetensors"
         legacy.parent.mkdir(parents=True, exist_ok=True)
         legacy.write_bytes(b"legacy adapter")
     calls = []
@@ -66,6 +68,9 @@ def test_other_families_and_zero_never_resolve_or_apply_overhaul(monkeypatch, mo
 
 @pytest.mark.parametrize("strength", [.25, .5, .75, 1])
 def test_overhaul_only_patches_diffusion_weights(monkeypatch, strength):
+    monkeypatch.setattr(creator.control_center, "_get_cc_config", lambda repo: {"lora": []})
+    monkeypatch.setattr(creator.control_center, "_apply_active_installed_paths", lambda value: value)
+    monkeypatch.setattr(creator.control_center, "_resolve_family_asset", lambda *a, **k: "overhaul.safetensors")
     monkeypatch.setattr(creator, "get_lora_full_path", lambda name: "/test/overhaul.safetensors")
     calls = []
     def apply(*args):
@@ -79,6 +84,9 @@ def test_overhaul_only_patches_diffusion_weights(monkeypatch, strength):
 
 
 def test_missing_enabled_overhaul_has_an_actionable_error(monkeypatch):
+    monkeypatch.setattr(creator.control_center, "_get_cc_config", lambda repo: {"lora": []})
+    monkeypatch.setattr(creator.control_center, "_apply_active_installed_paths", lambda value: value)
+    monkeypatch.setattr(creator.control_center, "_resolve_family_asset", lambda *a, **k: "")
     monkeypatch.setattr(creator, "get_lora_full_path", lambda name: None)
     with pytest.raises(ValueError, match="Download.*or set its strength to 0"):
         creator.apply_creator_overhaul("model", "clip", {"generation_mode": "qi2"}, None)
@@ -106,6 +114,9 @@ def test_both_generation_paths_apply_overhaul_before_turbo_and_sampling(monkeypa
     monkeypatch.setattr(creator, "save_config", lambda *args: str(tmp_path / "config.json"))
     monkeypatch.setattr(creator, "load_generation_assets", lambda settings: ("key", "model", "clip", "vae"))
     monkeypatch.setattr(creator, "acquire_preview_assets", lambda settings: ("model", "clip", "vae"))
+    monkeypatch.setattr(creator.control_center, "_get_cc_config", lambda repo: {"lora": []})
+    monkeypatch.setattr(creator.control_center, "_apply_active_installed_paths", lambda value: value)
+    monkeypatch.setattr(creator.control_center, "_resolve_family_asset", lambda *a, **k: "overhaul.safetensors")
     monkeypatch.setattr(creator, "get_lora_full_path", lambda name: "/test/overhaul.safetensors")
     monkeypatch.setattr(creator.comfy.utils, "load_torch_file", lambda *a, **kw: {"weights": True}, raising=False)
     def load_lora(model, clip, weights, strength_model, strength_clip):

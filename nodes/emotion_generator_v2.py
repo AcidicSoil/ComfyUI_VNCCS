@@ -23,33 +23,27 @@ from .character_creator_v2 import (
     load_anima_assets,
     load_generation_assets,
     normalize_gen_settings,
+    resolve_installed_generation_assets,
     get_lora_full_path,
 )
 from .vnccs_pipe import VNCCS_Pipe
 
 
-QI2_TURBO_LORA_NAME = "QI2/Viggle/Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r128.safetensors"
 QI2_DEFAULTS = {
     "generation_mode": "qi2",
-    "diffusion_model_name": "qwen_image_2.1_int8_convrot.safetensors",
-    "clip_name": "qwen3vl_8b_int8_convrot.safetensors",
-    "vae_name": "qwen_image_2.1_vae_bf16.safetensors",
+    "diffusion_model_name": "",
+    "clip_name": "",
+    "vae_name": "",
     "clip_type": "qwen_image",
     "sampler": "euler",
     "scheduler": "simple",
     "steps": 25,
     "cfg": 3.0,
     "turbo_enabled": False,
-    "dmd_lora_name": QI2_TURBO_LORA_NAME,
+    "dmd_lora_name": "",
     "dmd_lora_strength": 1.0,
     "lora_stack": [],
     "qi2_cache": {"device": "gpu", "dtype": "int8"},
-}
-QI2_TURBO_ENTRY = {
-    "name": "Qwen Image 2.1 Viggle Turbo",
-    "type": "TurboLora",
-    "kind": "QI2",
-    "local_path": f"models/loras/{QI2_TURBO_LORA_NAME}",
 }
 
 # --- ComfyUI Server Imports ---
@@ -170,6 +164,7 @@ def build_emotion_pipe(generation_model="Anima", generation_settings="{}"):
             gen_settings.update(mode_profile)
         gen_settings["generation_mode"] = "qi2"
         gen_settings["clip_type"] = "qwen_image"
+        gen_settings = resolve_installed_generation_assets(gen_settings)
         if gen_settings.get("turbo_enabled"):
             gen_settings["steps"] = 6
             gen_settings["cfg"] = 1.0
@@ -256,12 +251,19 @@ def build_emotion_pipe(generation_model="Anima", generation_settings="{}"):
             "device": cache.get("device") if cache.get("device") in {"auto", "gpu", "cpu", "off"} else "gpu",
             "dtype": cache.get("dtype") if cache.get("dtype") in {"default", "int8", "int4"} else "int8",
         }
-        pipe.lora_entries = [dict(QI2_TURBO_ENTRY)]
-        pipe.lora_states = [{
-            "name": QI2_TURBO_ENTRY["name"],
+        turbo_rel = str(gen_settings.get("dmd_lora_name", "") or "").replace("\\", "/")
+        pipe.lora_entries = ([{
+            "name": turbo_rel,
+            "type": "TurboLora",
+            "kind": "QI2",
+            "role": "turbo",
+            "local_path": f"models/loras/{turbo_rel}",
+        }] if turbo_rel else [])
+        pipe.lora_states = ([{
+            "name": turbo_rel,
             "auto_apply": bool(gen_settings.get("turbo_enabled")),
             "strength": float(gen_settings.get("dmd_lora_strength", 1.0) or 1.0),
-        }]
+        }] if turbo_rel else [])
     return pipe, seed
 
 

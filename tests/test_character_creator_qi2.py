@@ -16,7 +16,6 @@ from nodes import character_generator as generator
     ("QI2\\Viggle\\current.safetensors", False),
     ("QI2/Viggle/alternate.safetensors", True),
     ("", False),
-    (creator.QI2_TURBO_LORA_NAME, False),
 ])
 def test_creator_turbo_uses_control_center_catalog_and_selected_path(monkeypatch, tmp_path, selection, use_alternate):
     entries = [
@@ -64,7 +63,7 @@ def test_creator_enabled_turbo_requires_a_qi2_catalog_entry(monkeypatch):
         "local_path": "models/loras/wrong-family.safetensors",
     }]})
     monkeypatch.setattr(creator.control_center, "get_installed_version_info", lambda: {})
-    with pytest.raises(ValueError, match="Turbo LoRA.*Control Center catalog"):
+    with pytest.raises(ValueError, match="Turbo LoRA.*compatible QI2 turbo adapter"):
         creator.prepare_qi2_model("model", {"turbo_enabled": True})
 
 

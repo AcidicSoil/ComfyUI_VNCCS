@@ -24,7 +24,6 @@ const DEFAULT_MODEL_STEPS = 4;
 const DEFAULT_MODEL_CFG = 1.0;
 const DEFAULT_MODEL_SCHEDULER = "simple";
 const PENDING_DEPENDENCY_INSTALLS_KEY = "vnccs-control-center-pending-dependency-installs";
-const DEFAULT_QI2_MODEL = "Qwen Image 2.1 INT8 ConvRot";
 const MODEL_FAMILIES = [
     { kind: "QI2", label: "Qwen Image 2.1", defaultType: "unet", preferredTypes: ["unet", "custom"], steps: 25, cfg: 3, sampler: "euler" },
     { kind: "Klein9b", label: "Flux Klein9b", defaultType: "unet", preferredTypes: ["unet", "custom"], steps: 4, sampler: "euler" },
@@ -1468,8 +1467,13 @@ class VNCCSControlCenterWidget {
         if (selectedByType[familyKey]) return selectedByType[familyKey];
         if (this._activeKind() === "QI2") {
             const legacy = this.state.selected_model;
-            if (legacy && this._visibleModelsByType(type).some(entry => entry.name === legacy)) return legacy;
-            return type === "unet" ? (this._visibleModelsByType(type)[0]?.name || DEFAULT_QI2_MODEL) : "";
+            const variants = this._visibleModelsByType(type);
+            const legacyEntry = variants.find(entry => entry.name === legacy);
+            if (legacyEntry && this._resolveStatus(
+                this.dlStatus?.[`cc_models_${legacyEntry.name}`]?.status,
+                legacyEntry.status,
+            ) === "installed") return legacy;
+            return type === "unet" ? (variants[0]?.name || "") : "";
         }
         return "";
     }
@@ -1509,7 +1513,13 @@ class VNCCSControlCenterWidget {
         const activeKind = this._activeKind().toLowerCase();
         return (this.config?.models || []).filter(m =>
             (!m.type || m.type === type) && this._metaKind(m).toLowerCase() === activeKind
-        ).sort((a, b) => Number(b.name === DEFAULT_QI2_MODEL) - Number(a.name === DEFAULT_QI2_MODEL));
+        ).sort((a, b) => {
+            const installed = entry => this._resolveStatus(
+                this.dlStatus?.[`cc_models_${entry.name}`]?.status,
+                entry.status,
+            ) === "installed";
+            return Number(installed(b)) - Number(installed(a));
+        });
     }
 
     _metaKind(entry) {
@@ -1689,7 +1699,7 @@ class VNCCSControlCenterWidget {
             this.state.unsupported_model_kind = "QIE2511";
             this.state.active_kind = "QI2";
             this.state.selected_type = "unet";
-            this.state.selected_model = DEFAULT_QI2_MODEL;
+            this.state.selected_model = "";
         }
         this.state.active_kind = this._activeKind();
         if (!this.state.selected_types_by_kind) this.state.selected_types_by_kind = {};

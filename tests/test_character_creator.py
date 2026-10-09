@@ -14,6 +14,7 @@ from nodes.character_creator_v2 import (
     CharacterCreatorV2,
     decode_generation_samples,
     normalize_gen_settings,
+    resolve_installed_generation_assets,
     postprocess_character_wizard_result,
 )
 from utils import normalize_hair_tags
@@ -188,11 +189,66 @@ class TestGenerationModes:
         assert settings["cfg"] == 4.0
         assert settings["sampler"] == "er_sde"
         assert settings["scheduler"] == "simple"
-        assert settings["clip_name"] == "qwen_3_06b_base.safetensors"
-        assert settings["vae_name"] == "qwen_image_vae.safetensors"
+        assert settings["clip_name"] == ""
+        assert settings["vae_name"] == ""
         assert settings["clip_type"] == "stable_diffusion"
-        assert settings["dmd_lora_name"] == "anima\\anima-turbo-lora-v0.1.safetensors"
+        assert settings["dmd_lora_name"] == ""
         assert settings["turbo_enabled"] is False
+
+    def test_qi2_defaults_do_not_require_exact_asset_filenames(self):
+        settings = normalize_gen_settings({"generation_mode": "qi2"})
+        assert settings["diffusion_model_name"] == ""
+        assert settings["clip_name"] == ""
+        assert settings["vae_name"] == ""
+        assert settings["dmd_lora_name"] == ""
+        assert settings["clip_type"] == "qwen_image"
+
+    def test_runtime_resolves_installed_illustrious_checkpoint_by_family(self, monkeypatch):
+        from nodes import vnccs_control_center as control_center
+        config = {
+            "models": [{
+                "name": "localMix.safetensors", "kind": "Illustrious", "type": "checkpoint",
+                "local_path": "models/checkpoints/Illustrious/localMix.safetensors", "local": True,
+            }],
+        }
+        monkeypatch.setattr(control_center, "_get_cc_config", lambda *a, **k: config)
+        monkeypatch.setattr(control_center, "_apply_active_installed_paths", lambda value: value)
+        monkeypatch.setattr(control_center, "_find_model_on_disk", lambda path: (path, True))
+        monkeypatch.setattr(control_center, "_direct_asset_exists", lambda *a, **k: False)
+
+        resolved = resolve_installed_generation_assets({
+            "generation_mode": "illustrious",
+            "ckpt_name": "missing-checkpoint.safetensors",
+        })
+
+        assert resolved["ckpt_name"] == "Illustrious/localMix.safetensors"
+
+    def test_runtime_resolves_installed_qi2_assets_by_family(self, monkeypatch):
+        from nodes import vnccs_control_center as control_center
+        config = {
+            "models": [{"name": "local model", "kind": "QI2", "type": "unet", "local_path": "models/diffusion_models/qwenImage21Turbo8_v10.safetensors"}],
+            "clip": [{"name": "local clip", "kind": "QI2", "type": "TextEncoder", "clip_type": "qwen_image", "local_path": "models/text_encoders/qwenImage21TextEncoderOriginal_v10_3241874.safetensors"}],
+            "vae": [{"name": "local vae", "kind": "QI2", "type": "VAE", "local_path": "models/vae/qwenImage21VAEOriginalBf16_v10.safetensors"}],
+            "lora": [{"name": "local turbo", "kind": "QI2", "type": "TurboLora", "role": "turbo", "local_path": "models/loras/qwen/qwen-image-2.1/Qwen-Image-2.1-viggle-turbo-4step-lora-r64.safetensors"}],
+        }
+        monkeypatch.setattr(control_center, "_get_cc_config", lambda *a, **k: config)
+        monkeypatch.setattr(control_center, "_apply_active_installed_paths", lambda value: value)
+        monkeypatch.setattr(control_center, "_find_model_on_disk", lambda path: (path, True))
+        monkeypatch.setattr(control_center, "_direct_asset_exists", lambda *a, **k: False)
+
+        resolved = resolve_installed_generation_assets({
+            "generation_mode": "qi2",
+            "diffusion_model_name": "missing-model.safetensors",
+            "clip_name": "missing-clip.safetensors",
+            "vae_name": "missing-vae.safetensors",
+            "turbo_enabled": True,
+            "dmd_lora_name": "missing-turbo.safetensors",
+        })
+
+        assert resolved["diffusion_model_name"] == "qwenImage21Turbo8_v10.safetensors"
+        assert resolved["clip_name"] == "qwenImage21TextEncoderOriginal_v10_3241874.safetensors"
+        assert resolved["vae_name"] == "qwenImage21VAEOriginalBf16_v10.safetensors"
+        assert resolved["dmd_lora_name"].endswith("Qwen-Image-2.1-viggle-turbo-4step-lora-r64.safetensors")
 
     def test_normalize_gen_settings_prefers_active_mode_profile(self):
         settings = normalize_gen_settings({

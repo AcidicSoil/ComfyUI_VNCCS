@@ -17,10 +17,10 @@ from .emotion_generator_v2 import build_anima_emotion_prompt, build_emotion_pipe
 
 SERVICE_ANIMA_SETTINGS = {
     "generation_mode": "anima",
-    "ckpt_name": "Illustrious\\ILFlatMix.safetensors",
-    "diffusion_model_name": "anima-base-v1.0.safetensors",
-    "clip_name": "qwen_3_06b_base.safetensors",
-    "vae_name": "qwen_image_vae.safetensors",
+    "ckpt_name": "",
+    "diffusion_model_name": "",
+    "clip_name": "",
+    "vae_name": "",
     "clip_type": "stable_diffusion",
     "sampler": "er_sde",
     "scheduler": "simple",
@@ -30,7 +30,7 @@ SERVICE_ANIMA_SETTINGS = {
     "seed_mode": "fixed",
     "turbo_enabled": True,
     "turbo_previous_settings": {"steps": 30, "cfg": 4},
-    "dmd_lora_name": "Anima/anima-turbo-lora-v0.1.safetensors",
+    "dmd_lora_name": "",
     "dmd_lora_strength": 1,
     "lora_stack": [],
 }

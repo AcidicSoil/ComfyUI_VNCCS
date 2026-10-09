@@ -143,34 +143,32 @@ ANIMA_DEFAULTS = {
     "generation_mode": "anima",
     "target_size": 1024,
     "diffusion_model_name": "",
-    "clip_name": "qwen_3_06b_base.safetensors",
-    "vae_name": "qwen_image_vae.safetensors",
+    "clip_name": "",
+    "vae_name": "",
     "clip_type": "stable_diffusion",
     "sampler": "er_sde",
     "scheduler": "simple",
     "steps": 30,
     "cfg": 4.0,
     "turbo_enabled": False,
-    "dmd_lora_name": "anima\\anima-turbo-lora-v0.1.safetensors",
+    "dmd_lora_name": "",
     "dmd_lora_strength": 1.0,
     "lora_stack": [],
 }
 
-QI2_TURBO_LORA_NAME = "QI2/Viggle/Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r128.safetensors"
-QI2_OVERHAUL_LORA_NAME = "QI2.1/VNCCS/VNCCS_QI2_AnimeOverhaulV1.safetensors"
 QI2_DEFAULTS = {
     "generation_mode": "qi2",
     "target_size": 1024,
-    "diffusion_model_name": "qwen_image_2.1_int8_convrot.safetensors",
-    "clip_name": "qwen3vl_8b_int8_convrot.safetensors",
-    "vae_name": "qwen_image_2.1_vae_bf16.safetensors",
+    "diffusion_model_name": "",
+    "clip_name": "",
+    "vae_name": "",
     "clip_type": "qwen_image",
     "sampler": "euler",
     "scheduler": "simple",
     "steps": 25,
     "cfg": 3.0,
     "turbo_enabled": False,
-    "dmd_lora_name": QI2_TURBO_LORA_NAME,
+    "dmd_lora_name": "",
     "dmd_lora_strength": 1.0,
     "qi2_overhaul_strength": 0.5,
     "lora_stack": [],
@@ -667,11 +665,11 @@ def apply_creator_overhaul(model, clip, gen_settings, apply_lora):
     strength = normalize_overhaul_strength(gen_settings.get("qi2_overhaul_strength", 0.5))
     if strength == 0:
         return model, clip
-    config = control_center._get_cc_config("MIUProject/VNCCS_v3.0")
-    entry = control_center._find_entry(config.get("lora", []), "VNCCS Overhaul QI2")
-    lora_path, installed = control_center._find_model_on_disk(entry.get("local_path", "")) if entry else (None, False)
-    if not installed:
-        lora_path = get_lora_full_path(QI2_OVERHAUL_LORA_NAME)
+    config = control_center._apply_active_installed_paths(
+        control_center._get_cc_config("MIUProject/VNCCS_v3.0")
+    )
+    rel = control_center._resolve_family_asset(config, "lora", "QI2", role="overhaul")
+    lora_path = get_lora_full_path(rel) if rel else None
     if not lora_path:
         raise ValueError(
             "Qwen Image2.1 Character Overhaul is not installed. Download its card "
@@ -732,6 +730,58 @@ def normalize_gen_settings(gen_settings):
     return merged
 
 
+def resolve_installed_generation_assets(gen_settings):
+    """Resolve split-model generation assets from installed family-compatible inventory."""
+    resolved = dict(gen_settings or {})
+    mode = str(resolved.get("generation_mode", "illustrious") or "illustrious").lower()
+    if mode not in {"illustrious", "anima", "qi2"}:
+        return resolved
+
+    config = control_center._apply_active_installed_paths(
+        control_center._get_cc_config("MIUProject/VNCCS_v3.0")
+    )
+    if mode == "illustrious":
+        resolved["ckpt_name"] = control_center._resolve_family_asset(
+            config,
+            "models",
+            "Illustrious",
+            resolved.get("ckpt_name", ""),
+            entry_types={"checkpoint"},
+        )
+        return resolved
+
+    family = "QI2" if mode == "qi2" else "Anima"
+    specs = (
+        ("diffusion_model_name", "models", {"unet"}, None),
+        ("clip_name", "clip", None, None),
+        ("vae_name", "vae", None, None),
+    )
+    for key, section, entry_types, role in specs:
+        value = control_center._resolve_family_asset(
+            config,
+            section,
+            family,
+            resolved.get(key, ""),
+            entry_types=entry_types,
+            role=role,
+        )
+        resolved[key] = value
+
+    if mode == "qi2":
+        resolved["clip_type"] = "qwen_image"
+    if resolved.get("turbo_enabled"):
+        resolved["dmd_lora_name"] = control_center._resolve_family_asset(
+            config,
+            "lora",
+            family,
+            resolved.get("dmd_lora_name", ""),
+            role="turbo",
+        )
+    elif resolved.get("dmd_lora_name") and not control_center._direct_asset_exists("lora", resolved.get("dmd_lora_name")):
+        resolved["dmd_lora_name"] = ""
+    return resolved
+
+
 def _call_loader_node(class_names, method_names, **kwargs):
     mappings = getattr(nodes, "NODE_CLASS_MAPPINGS", {}) or {}
     for class_name in class_names:
@@ -778,6 +828,7 @@ def _call_node_method(class_names, method_names, **kwargs):
 
 def load_generation_clip(gen_settings):
     """Load a fresh text encoder for a split-model generation profile."""
+    gen_settings = resolve_installed_generation_assets(gen_settings)
     generation_mode = str(gen_settings.get("generation_mode", "anima") or "anima").lower()
     profile_label = "QI2" if generation_mode == "qi2" else "ANIMA"
     clip_name = gen_settings.get("clip_name")
@@ -815,6 +866,7 @@ def load_generation_clip(gen_settings):
 
 
 def load_anima_assets(gen_settings):
+    gen_settings.update(resolve_installed_generation_assets(gen_settings))
     generation_mode = str(gen_settings.get("generation_mode", "anima") or "anima").lower()
     profile_label = "QI2" if generation_mode == "qi2" else "ANIMA"
     diffusion_model_name = gen_settings.get("diffusion_model_name")
@@ -864,6 +916,7 @@ def load_anima_assets(gen_settings):
 
 
 def load_generation_assets(gen_settings):
+    gen_settings.update(resolve_installed_generation_assets(gen_settings))
     generation_mode = str(gen_settings.get("generation_mode", "illustrious")).lower()
 
     if generation_mode in {"anima", "qi2"}:
@@ -905,6 +958,7 @@ def load_generation_assets(gen_settings):
 @inference_stage()
 def acquire_preview_assets(gen_settings):
     """Return request-local preview assets while retaining only reusable state."""
+    gen_settings.update(resolve_installed_generation_assets(gen_settings))
     generation_mode = str(gen_settings.get("generation_mode", "illustrious") or "illustrious").lower()
     if generation_mode in {"anima", "qi2"}:
         asset_key = (
@@ -1178,13 +1232,18 @@ def prepare_qi2_model(model, gen_settings):
     lora_entries, lora_states = [], []
     if turbo_enabled:
         config = control_center._apply_active_installed_paths(control_center._get_cc_config("MIUProject/VNCCS_v3.0"))
-        entries = [entry for entry in config.get("lora", [])
-                   if control_center._entry_kind(entry) == "qi2" and control_center._entry_type(entry) == "turbolora"]
-        selected = str(gen_settings.get("dmd_lora_name", "") or "").strip().replace("\\", "/")
-        entry = next((item for item in entries if control_center._rel_within_folder(item.get("local_path", "")) == selected), None)
-        entry = entry or control_center._find_entry(entries, "Qwen Image 2.1 Viggle Turbo")
+        selected = control_center._resolve_family_asset(
+            config, "lora", "QI2", gen_settings.get("dmd_lora_name", ""), role="turbo"
+        )
+        entry = next((
+            item for item in config.get("lora", [])
+            if control_center._entry_kind(item) == "qi2"
+            and control_center._entry_role(item) == "turbo"
+            and control_center._rel_within_folder(item.get("local_path", "")) == selected
+        ), None)
         if entry is None:
-            raise ValueError("QI2 Turbo LoRA is not configured in the Control Center catalog.")
+            raise ValueError("QI2 Turbo LoRA is not installed. Install any compatible QI2 turbo adapter.")
+        gen_settings["dmd_lora_name"] = selected
         lora_entries = [dict(entry)]
         lora_states = [{
             "name": entry["name"],
@@ -1305,8 +1364,8 @@ def validate_anima_conditioning(positive, negative, clip_name):
     if bad_widths:
         raise ValueError(
             "ANIMA conditioning has the wrong text-encoder width "
-            f"{bad_widths[0]} instead of 1024. Select the official ANIMA text encoder "
-            f"'qwen_3_06b_base.safetensors' in the CLIP field; current CLIP is '{clip_name}'."
+            f"{bad_widths[0]} instead of 1024. Select an installed ANIMA-compatible text encoder "
+            f"in the CLIP field; current CLIP is '{clip_name}'."
         )
 
 

@@ -82,7 +82,6 @@ _DOWNLOAD_STATUS = {}
 _DOWNLOAD_QUEUE = queue.Queue()
 _CUSTOM_LORAS_FILE = "vnccs_custom_loras.json"
 _PACKAGED_CC_REPO_IDS = {"MIUProject/VNCCS_v3.0"}
-DEFAULT_QI2_MODEL = "Qwen Image 2.1 INT8 ConvRot"
 QI2_CACHE_DEFAULTS = {"device": "gpu", "dtype": "int8"}
 _PIPELINE_LOCAL_LORAS = {
     "clothescore",
@@ -895,6 +894,7 @@ _LOCAL_MODEL_SOURCES = (
     ("diffusion_models", "unet"),
     ("unet", "unet"),
     ("unet_gguf", "unet"),
+    ("checkpoints", "checkpoint"),
 )
 _QI2_REQUIRED_KEYS = {
     "txt_in.text_norm.weight",
@@ -937,6 +937,11 @@ def _local_model_family(rel_path, default_type, full_path=None):
     parent_parts = path_parts[:-1]
     ext = os.path.splitext(filename)[1]
     model_type = "gguf" if ext == ".gguf" else default_type
+
+    if "anima" in identity:
+        return "Anima", model_type
+    if default_type == "checkpoint" and ("illustrious" in identity or any(part in {"ill", "illustrious"} for part in parent_parts)):
+        return "Illustrious", model_type
 
     if "klein" in filename or any("klein" in part for part in parent_parts):
         if re.search(r"(?:^|[^0-9])4b(?:[^0-9]|$)", identity):
@@ -999,35 +1004,209 @@ def _local_model_entries():
     return entries
 
 
+def _aux_asset_family(section, rel_path):
+    normalized = str(rel_path or "").replace("\\", "/").strip("/")
+    identity = normalized.lower()
+    compact = re.sub(r"[^a-z0-9]+", "", identity)
+    if not normalized:
+        return None
+
+    if section == "clip":
+        if "qwenimage21" in compact or "qwen3vl8bint8convrot" in compact:
+            return {"kind": "QI2", "type": "TextEncoder", "clip_type": "qwen_image"}
+        if "/anima/" in f"/{identity}" or "qwen306bbase" in compact:
+            return {"kind": "Anima", "type": "TextEncoder", "clip_type": "stable_diffusion"}
+        if "minimax" in identity and "qwen3vl" in compact:
+            return {"kind": "MiniMaxH3", "type": "TextEncoder", "clip_type": "minimax"}
+        if ("klein" in identity and "4b" not in identity) or "qwen38bfp8mixed" in compact:
+            return {"kind": "Klein9b", "type": "TextEncoder", "clip_type": "flux2"}
+        return None
+
+    if section == "vae":
+        if "qwenimage21" in compact or "qwenimage21vae" in compact or "qwenimage21" in identity.replace("_", "").replace(".", ""):
+            return {"kind": "QI2", "type": "VAE"}
+        if "/anima/" in f"/{identity}" or compact == "qwenimagevaesafetensors":
+            return {"kind": "Anima", "type": "VAE"}
+        if "minimax" in identity and ("vae" in identity or "wan" in identity):
+            return {"kind": "MiniMaxH3", "type": "VAE"}
+        if "klein" in identity and ("vae" in identity or os.path.basename(identity).startswith("ae.")):
+            return {"kind": "Klein9b", "type": "VAE"}
+        return None
+
+    if section == "lora":
+        role = None
+        if "posestudio" in compact:
+            role = "pose"
+        elif "clothescore" in compact:
+            role = "clothes"
+        elif "overhaul" in compact:
+            role = "overhaul"
+        elif "viggle" in compact or "turbo" in compact:
+            role = "turbo"
+        if role is None:
+            return None
+
+        if "qi21" in compact or "qwenimage21" in compact or "qwenimage21" in identity.replace("-", "").replace("_", "").replace(".", ""):
+            kind = "QI2"
+        elif "anima" in identity:
+            kind = "Anima"
+        elif "minimax" in identity or "h3" in compact:
+            kind = "MiniMaxH3"
+        elif "klein" in identity and "4b" not in identity:
+            kind = "Klein9b"
+        else:
+            return None
+        return {
+            "kind": kind,
+            "type": "TurboLora" if role == "turbo" else "Helper",
+            "role": role,
+        }
+    return None
+
+
+def _local_asset_entries():
+    """Discover compatible generation assets from ComfyUI's registered model folders."""
+    result = {"models": _local_model_entries(), "clip": [], "vae": [], "lora": []}
+    sources = {
+        "clip": (("text_encoders", "TextEncoder"),),
+        "vae": (("vae", "VAE"),),
+        "lora": (("loras", "Lora"),),
+    }
+    for section, section_sources in sources.items():
+        seen_paths = set()
+        for folder_key, default_type in section_sources:
+            try:
+                filenames = folder_paths.get_filename_list(folder_key) or []
+            except Exception as exc:
+                print(f"[VNCCS Control Center] folder_paths.get_filename_list failed for {folder_key}: {exc}")
+                continue
+            for value in filenames:
+                rel_path = str(value or "").replace("\\", "/").strip("/")
+                try:
+                    _validate_model_filename(rel_path)
+                except ValueError:
+                    continue
+                descriptor = _aux_asset_family(section, rel_path)
+                if descriptor is None:
+                    continue
+                full_path = get_full_path_agnostic(folder_paths, folder_key, rel_path, require_exists=True)
+                if not full_path:
+                    continue
+                identity = os.path.normcase(os.path.abspath(full_path))
+                if identity in seen_paths:
+                    continue
+                seen_paths.add(identity)
+                result[section].append({
+                    "name": rel_path,
+                    "type": descriptor.get("type", default_type),
+                    "kind": descriptor["kind"],
+                    "local_path": f"models/{folder_key}/{rel_path}",
+                    "description": f"Local {descriptor['kind']} {section} discovered from ComfyUI '{folder_key}'.",
+                    "source": "local",
+                    "local": True,
+                    **({"clip_type": descriptor["clip_type"]} if descriptor.get("clip_type") else {}),
+                    **({"role": descriptor["role"]} if descriptor.get("role") else {}),
+                })
+    return result
+
+
+def _entry_role(entry):
+    explicit = str(entry.get("role", "") or "").strip().lower()
+    if explicit:
+        return explicit
+    identity = " ".join([
+        str(entry.get("name", "")),
+        str(entry.get("local_path", "")),
+        str(entry.get("type", "")),
+    ]).lower()
+    compact = re.sub(r"[^a-z0-9]+", "", identity)
+    if "posestudio" in compact:
+        return "pose"
+    if "clothescore" in compact:
+        return "clothes"
+    if "overhaul" in compact:
+        return "overhaul"
+    if "turbolora" in compact or "viggle" in compact or "turbo" in compact:
+        return "turbo"
+    return ""
+
+
+def _direct_asset_exists(section, selected):
+    selected = str(selected or "").replace("\\", "/").strip("/")
+    if not selected:
+        return False
+    folder_keys = {
+        "models": ("diffusion_models", "unet", "unet_gguf"),
+        "clip": ("text_encoders",),
+        "vae": ("vae",),
+        "lora": ("loras",),
+    }.get(section, ())
+    for folder_key in folder_keys:
+        if get_full_path_agnostic(folder_paths, folder_key, selected, require_exists=True):
+            return True
+    return False
+
+
+def _resolve_family_asset(config, section, kind, selected="", entry_types=None, role=None):
+    """Resolve an installed asset by family/capability instead of an exact filename."""
+    selected = str(selected or "").replace("\\", "/").strip("/")
+    if selected and _direct_asset_exists(section, selected):
+        return selected
+
+    wanted_kind = _normalize_model_kind(kind)
+    wanted_types = {str(value).strip().lower() for value in (entry_types or set()) if str(value).strip()}
+    wanted_role = str(role or "").strip().lower()
+    candidates = []
+    for entry in (config or {}).get(section, []) or []:
+        if not isinstance(entry, dict):
+            continue
+        if wanted_kind and _entry_kind(entry) != wanted_kind:
+            continue
+        if wanted_types and _entry_type(entry) not in wanted_types:
+            continue
+        if wanted_role and _entry_role(entry) != wanted_role:
+            continue
+        rel = _rel_within_folder(entry.get("local_path", ""))
+        full_path, exists = _find_model_on_disk(entry.get("local_path", ""))
+        if not exists or not rel:
+            continue
+        if selected and (selected == rel or selected.lower() == str(entry.get("name", "")).strip().lower()):
+            return rel
+        candidates.append((entry, rel, full_path))
+
+    if not candidates:
+        return ""
+    candidates.sort(key=lambda item: (
+        1 if item[0].get("local") or item[0].get("source") == "local" else 0,
+        _version_sort_key(item[0].get("version")),
+        item[1].lower(),
+    ), reverse=True)
+    return candidates[0][1]
+
+
 def _merge_local_model_inventory(config):
-    """Merge compatible installed models without mutating the packaged catalog."""
+    """Merge compatible installed generation assets without mutating the packaged catalog."""
     if not isinstance(config, dict):
         return config
     result = dict(config)
-    catalog_models = [dict(entry) for entry in config.get("models", []) if isinstance(entry, dict)]
-    known_paths = {
-        str(entry.get("local_path") or "").replace("\\", "/").lower()
-        for entry in catalog_models
-        if entry.get("local_path")
-    }
-    known_full_paths = set()
-    for entry in catalog_models:
-        full_path, exists = _find_model_on_disk(entry.get("local_path", ""))
-        if exists and full_path:
-            known_full_paths.add(os.path.normcase(os.path.abspath(full_path)))
-
-    for entry in _local_model_entries():
-        local_path = str(entry.get("local_path") or "").replace("\\", "/")
-        full_path, exists = _find_model_on_disk(local_path)
-        normalized_full = os.path.normcase(os.path.abspath(full_path)) if exists and full_path else ""
-        if local_path.lower() in known_paths or (normalized_full and normalized_full in known_full_paths):
-            continue
-        catalog_models.append(entry)
-        known_paths.add(local_path.lower())
-        if normalized_full:
-            known_full_paths.add(normalized_full)
-
-    result["models"] = _dedupe_entries_by_name(catalog_models)
+    discovered = _local_asset_entries()
+    for section in ("models", "clip", "vae", "lora"):
+        catalog = [dict(entry) for entry in config.get(section, []) if isinstance(entry, dict)]
+        known_paths = {
+            os.path.normcase(os.path.abspath(full_path))
+            for entry in catalog
+            for full_path, exists in [_find_model_on_disk(entry.get("local_path", ""))]
+            if exists and full_path
+        }
+        for entry in discovered.get(section, []):
+            full_path, exists = _find_model_on_disk(entry.get("local_path", ""))
+            normalized = os.path.normcase(os.path.abspath(full_path)) if exists and full_path else ""
+            if normalized and normalized in known_paths:
+                continue
+            catalog.append(entry)
+            if normalized:
+                known_paths.add(normalized)
+        result[section] = _dedupe_entries_by_name(catalog)
     return result
 
 
@@ -1079,6 +1258,18 @@ def _selected_model_name_for_type(state, entry_type, kind=""):
     return ""
 
 
+def _model_entry_is_installed(entry):
+    if not isinstance(entry, dict):
+        return False
+    _path, exists = _find_model_on_disk(entry.get("local_path", ""))
+    return bool(exists)
+
+
+def _prefer_installed_model(entries):
+    entries = [entry for entry in (entries or []) if isinstance(entry, dict)]
+    return next((entry for entry in entries if _model_entry_is_installed(entry)), None) or next(iter(entries), None)
+
+
 def _custom_context_model_entry(config, state):
     models = config.get("models", []) if isinstance(config, dict) else []
     active_kind = str(state.get("active_kind", "QI2") or "QI2").strip()
@@ -1088,18 +1279,12 @@ def _custom_context_model_entry(config, state):
     selected = _find_entry(models, name)
     if selected and _entry_type(selected) == context_type and (not normalized_kind or _entry_kind(selected) == normalized_kind):
         return selected
-    if normalized_kind in {"", "qi2"}:
-        preferred = _find_entry(models, DEFAULT_QI2_MODEL)
-        if preferred and _entry_type(preferred) == "unet" and _entry_kind(preferred) == "qi2":
-            return preferred
-    matched = next(
-        (
-            entry for entry in models
-            if _entry_type(entry) == context_type
-            and (not normalized_kind or _entry_kind(entry) == normalized_kind)
-        ),
-        None,
-    )
+    matched_candidates = [
+        entry for entry in models
+        if _entry_type(entry) == context_type
+        and (not normalized_kind or _entry_kind(entry) == normalized_kind)
+    ]
+    matched = _prefer_installed_model(matched_candidates)
     if matched:
         return matched
     if normalized_kind:
@@ -2041,24 +2226,47 @@ def _build_control_center_pipe(
         selection_kind = _normalize_model_kind(active_kind) or _entry_kind(model_entry)
         if not selection_kind and model_entry is None:
             selection_kind = "qi2"
-        if selection_kind == "qi2" and selected_type in {"", "gguf", "unet"}:
-            selected_type = "unet"
-            if not model_entry or _entry_type(model_entry) != "unet" or _entry_kind(model_entry) != "qi2":
-                candidates = [
-                    entry for entry in config.get("models", [])
-                    if _entry_kind(entry) == "qi2" and _entry_type(entry) == "unet"
-                ]
-                saved_unet = _selected_model_name_for_type(state, "unet", "QI2")
-                model_entry = (
-                    _find_entry(candidates, saved_unet)
-                    or _find_entry(candidates, DEFAULT_QI2_MODEL)
-                    or next(iter(candidates), None)
-                )
-            if model_entry is None:
-                raise RuntimeError(
-                    "[VNCCS Control Center] No native QI2 UNet model in the catalog. "
-                    "Refresh the Control Center catalog to load Qwen Image 2.1."
-                )
+
+        managed_families = {"qi2", "klein9b", "minimaxh3"}
+        if selection_kind in managed_families:
+            target_type = str(selected_type or "").strip().lower()
+            # QI2 no longer supports the retired GGUF edit path. Saved legacy
+            # QI2 GGUF state migrates to a native UNet. Other families retain
+            # the explicitly selected loader type.
+            if selection_kind == "qi2" and target_type in {"", "gguf", "unet"}:
+                target_type = "unet"
+                selected_type = "unet"
+            elif not target_type:
+                target_type = "unet"
+                selected_type = "unet"
+
+            if target_type in {"unet", "checkpoint", "gguf"}:
+                if (
+                    not model_entry
+                    or _entry_type(model_entry) != target_type
+                    or _entry_kind(model_entry) != selection_kind
+                    or not _model_entry_is_installed(model_entry)
+                ):
+                    candidates = [
+                        entry for entry in config.get("models", [])
+                        if _entry_kind(entry) == selection_kind and _entry_type(entry) == target_type
+                    ]
+                    saved_name = _selected_model_name_for_type(state, target_type, active_kind)
+                    saved_entry = _find_entry(candidates, saved_name)
+                    model_entry = (
+                        saved_entry if _model_entry_is_installed(saved_entry) else _prefer_installed_model(candidates)
+                    )
+                if model_entry is None:
+                    family_label = {
+                        "qi2": "QI2",
+                        "klein9b": "Klein9b",
+                        "minimaxh3": "MiniMax H3",
+                    }[selection_kind]
+                    type_label = {"unet": "UNet", "gguf": "GGUF", "checkpoint": "checkpoint"}.get(target_type, target_type)
+                    raise RuntimeError(
+                        f"[VNCCS Control Center] No installed {family_label} {type_label} model was found. "
+                        "Refresh the Control Center catalog or install a compatible model."
+                    )
     loras = _ensure_required_turbo_lora_state(loras, config, model_entry, model_params)
     lora_entry_by_name = {
         entry.get("name"): entry

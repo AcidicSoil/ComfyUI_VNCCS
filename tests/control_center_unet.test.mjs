@@ -5,11 +5,12 @@ import test from "node:test";
 import vm from "node:vm";
 
 const source = readFileSync(new URL("../web/vnccs_control_center.js", import.meta.url), "utf8");
-const defaultName = "Qwen Image 2.1 INT8 ConvRot";
+const defaultName = "Installed local QI2";
 const models = [
-    { name: "Other QI2", type: "unet", kind: "QI2" },
-    { name: defaultName, type: "unet", kind: "QI2" },
-    { name: "Flux Klein", type: "unet", kind: "Klein9b" },
+    { name: "Missing catalog QI2", type: "unet", kind: "QI2", status: "missing" },
+    { name: defaultName, type: "unet", kind: "QI2", status: "installed", local: true },
+    { name: "Other QI2", type: "unet", kind: "QI2", status: "installed", local: true },
+    { name: "Flux Klein", type: "unet", kind: "Klein9b", status: "installed" },
 ];
 const turbo = { name: "Qwen Image 2.1 Viggle Turbo", type: "TurboLora", kind: "QI2" };
 
@@ -99,7 +100,7 @@ test("packaged workflows select QI2 without legacy model state", () => {
         if (value.type === "VNCCS_ControlCenter") {
             const saved = JSON.parse(value.widgets_values[1]);
             assert.equal(saved.active_kind, "QI2");
-            assert.equal(saved.selected_model, defaultName);
+            assert.equal(saved.selected_model, "");
             const turboEnabled = saved.loras.some(lora => lora.name === turbo.name && lora.auto_apply);
             assert.equal(saved.model_params.steps, turboEnabled ? 6 : 25);
             assert.equal(saved.model_params.cfg, turboEnabled ? 1 : 3);

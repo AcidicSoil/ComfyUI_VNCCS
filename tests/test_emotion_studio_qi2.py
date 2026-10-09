@@ -14,6 +14,12 @@ UI_SOURCE = (ROOT / "web" / "vnccs_emotion_v2.js").read_text(encoding="utf-8")
 
 def test_emotion_studio_builds_qi2_pipe_with_cache_and_viggle_state(monkeypatch):
     monkeypatch.setattr(emotion, "load_anima_assets", lambda settings: ("model", "clip", "vae"))
+    turbo_rel = "qwen/qwen-image-2.1/Qwen-Image-2.1-viggle-turbo-4step-lora-r64.safetensors"
+    monkeypatch.setattr(
+        emotion,
+        "resolve_installed_generation_assets",
+        lambda settings: {**settings, "dmd_lora_name": turbo_rel},
+    )
     settings = {
         "generation_mode": "qi2",
         "mode_settings": {
@@ -34,9 +40,9 @@ def test_emotion_studio_builds_qi2_pipe_with_cache_and_viggle_state(monkeypatch)
     assert pipe.qi2_cache == {"device": "cpu", "dtype": "int4"}
     assert pipe.sample_steps == 6
     assert pipe.cfg == 1.0
-    assert pipe.lora_entries[0]["name"] == "Qwen Image 2.1 Viggle Turbo"
+    assert pipe.lora_entries[0]["name"] == turbo_rel
     assert pipe.lora_states == [{
-        "name": "Qwen Image 2.1 Viggle Turbo",
+        "name": turbo_rel,
         "auto_apply": True,
         "strength": 1.0,
     }]

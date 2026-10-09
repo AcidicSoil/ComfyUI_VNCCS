@@ -31,7 +31,10 @@ from nodes.vnccs_control_center import (
     _dedupe_config_by_name,
     _local_model_family,
     _local_model_entries,
+    _aux_asset_family,
+    _local_asset_entries,
     _merge_local_model_inventory,
+    _resolve_family_asset,
     _enrich_config_entries,
     _merge_custom_loras,
     _remove_custom_lora,
@@ -387,6 +390,73 @@ class TestModuleStatusHelpers:
         assert '"manager_id": "comfyui-easy-sam3"' in source
         assert '"manager_version": "latest"' in source
         assert '"darwin_compatibility_warning"' in source
+
+
+class TestLocalGenerationAssetDiscovery:
+    def test_discovers_qi2_text_encoder_vae_and_turbo_lora_from_installed_inventory(self, tmp_path, monkeypatch):
+        files = {
+            "text_encoders": ["qwenImage21TextEncoderOriginal_v10_3241874.safetensors"],
+            "vae": ["qwenImage21VAEOriginalBf16_v10.safetensors"],
+            "loras": ["qwen/qwen-image-2.1/Qwen-Image-2.1-viggle-turbo-4step-lora-r64.safetensors"],
+        }
+        for category, names in files.items():
+            for name in names:
+                path = tmp_path / category / name.replace("/", os.sep)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"x")
+
+        monkeypatch.setattr(
+            _CONTROL_CENTER_MODULE.folder_paths,
+            "get_filename_list",
+            lambda category: files.get(category, []),
+        )
+        monkeypatch.setattr(
+            _CONTROL_CENTER_MODULE,
+            "get_full_path_agnostic",
+            lambda _fp, category, name, require_exists=False: str(tmp_path / category / name.replace("/", os.sep)),
+        )
+
+        entries = _local_asset_entries()
+        clips = [entry for entry in entries["clip"] if entry["kind"] == "QI2"]
+        vaes = [entry for entry in entries["vae"] if entry["kind"] == "QI2"]
+        loras = [entry for entry in entries["lora"] if entry["kind"] == "QI2"]
+
+        assert clips[0]["name"] == "qwenImage21TextEncoderOriginal_v10_3241874.safetensors"
+        assert clips[0]["clip_type"] == "qwen_image"
+        assert vaes[0]["name"] == "qwenImage21VAEOriginalBf16_v10.safetensors"
+        assert loras[0]["role"] == "turbo"
+
+    def test_auxiliary_asset_classification_covers_all_active_generation_families(self):
+        assert _aux_asset_family("clip", "qwenImage21TextEncoderOriginal_v10_3241874.safetensors")["kind"] == "QI2"
+        assert _aux_asset_family("vae", "qwenImage21VAEOriginalBf16_v10.safetensors")["kind"] == "QI2"
+
+        assert _aux_asset_family("clip", "anima/qwen_3_06b_base.safetensors")["kind"] == "Anima"
+        assert _aux_asset_family("vae", "qwen_image_vae.safetensors")["kind"] == "Anima"
+        assert _aux_asset_family("lora", "Anima/anima-turbo-lora-v0.1.safetensors") == {
+            "kind": "Anima", "type": "TurboLora", "role": "turbo"
+        }
+
+        assert _aux_asset_family("clip", "qwen_3_8b_fp8mixed.safetensors")["kind"] == "Klein9b"
+        assert _aux_asset_family("vae", "klein/ae.safetensors")["kind"] == "Klein9b"
+        assert _aux_asset_family("lora", "Klein9b/VNCCS_PoseStudioKlein9b_V2.5.safetensors")["role"] == "pose"
+
+        assert _aux_asset_family("clip", "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors")["kind"] == "MiniMaxH3"
+        assert _aux_asset_family("vae", "minimax_h3_video_vae_fp16.safetensors")["kind"] == "MiniMaxH3"
+        assert _aux_asset_family("lora", "MiniMaxH3/VNCCS/VNCCS_ClothesCoreMiniMaxH3V1.safetensors")["role"] == "clothes"
+
+    def test_resolver_replaces_missing_hardcoded_qi2_assets_with_installed_family_matches(self, monkeypatch):
+        config = {
+            "models": [{"name": "qwenImage21Turbo8_v10.safetensors", "kind": "QI2", "type": "unet", "local_path": "models/diffusion_models/qwenImage21Turbo8_v10.safetensors", "local": True}],
+            "clip": [{"name": "qwenImage21TextEncoderOriginal_v10_3241874.safetensors", "kind": "QI2", "type": "TextEncoder", "clip_type": "qwen_image", "local_path": "models/text_encoders/qwenImage21TextEncoderOriginal_v10_3241874.safetensors", "local": True}],
+            "vae": [{"name": "qwenImage21VAEOriginalBf16_v10.safetensors", "kind": "QI2", "type": "VAE", "local_path": "models/vae/qwenImage21VAEOriginalBf16_v10.safetensors", "local": True}],
+            "lora": [{"name": "qwen/qwen-image-2.1/Qwen-Image-2.1-viggle-turbo-4step-lora-r64.safetensors", "kind": "QI2", "type": "TurboLora", "role": "turbo", "local_path": "models/loras/qwen/qwen-image-2.1/Qwen-Image-2.1-viggle-turbo-4step-lora-r64.safetensors", "local": True}],
+        }
+        monkeypatch.setattr(_CONTROL_CENTER_MODULE, "_find_model_on_disk", lambda path: (path, True))
+
+        assert _resolve_family_asset(config, "models", "QI2", "qwen_image_2.1_int8_convrot.safetensors", entry_types={"unet"}) == "qwenImage21Turbo8_v10.safetensors"
+        assert _resolve_family_asset(config, "clip", "QI2", "qwen3vl_8b_int8_convrot.safetensors") == "qwenImage21TextEncoderOriginal_v10_3241874.safetensors"
+        assert _resolve_family_asset(config, "vae", "QI2", "qwen_image_2.1_vae_bf16.safetensors") == "qwenImage21VAEOriginalBf16_v10.safetensors"
+        assert _resolve_family_asset(config, "lora", "QI2", "QI2/Viggle/missing.safetensors", role="turbo") == "qwen/qwen-image-2.1/Qwen-Image-2.1-viggle-turbo-4step-lora-r64.safetensors"
 
 
 class TestDownloadedModelValidation:
@@ -823,6 +893,44 @@ class TestControlCenterFamilyState:
         assert pipe.sample_steps == 4
         assert pipe.cfg == 1.0
         assert pipe.sampler_name == "euler"
+
+    @pytest.mark.parametrize("family", ["QI2", "Klein9b", "MiniMaxH3"])
+    def test_blank_or_missing_family_selection_prefers_installed_same_family_model(self, monkeypatch, family):
+        missing = {"name": f"Missing {family}", "type": "unet", "kind": family, "installed": False}
+        installed = {"name": f"Installed {family}", "type": "unet", "kind": family, "installed": True}
+        vaes = [{"name": f"{family} VAE", "kind": family, "type": "VAE"}]
+        if family == "MiniMaxH3":
+            vaes.append({"name": f"{family} Audio VAE", "kind": family, "type": "AudioVAE"})
+        monkeypatch.setattr("nodes.vnccs_control_center._get_cc_config", lambda repo_id: {
+            "models": [missing, installed],
+            "clip": [{"name": f"{family} CLIP", "kind": family}],
+            "vae": vaes,
+            "lora": [],
+        })
+        monkeypatch.setattr(
+            "nodes.vnccs_control_center._model_entry_is_installed",
+            lambda entry: bool(entry and entry.get("installed")),
+        )
+        captured = {}
+
+        def fake_load_model_block(entry, selected_type, *args, **kwargs):
+            captured.update(entry=entry, selected_type=selected_type)
+            return object(), object(), object()
+
+        monkeypatch.setattr("nodes.vnccs_control_center._load_model_block", fake_load_model_block)
+        monkeypatch.setattr("nodes.vnccs_control_center._apply_loras", lambda model, clip, *args, **kwargs: (model, clip))
+        if family == "MiniMaxH3":
+            monkeypatch.setattr("nodes.vnccs_control_center._load_vae", lambda *args, **kwargs: object())
+
+        pipe = _build_control_center_pipe("demo/repo", {
+            "active_kind": family,
+            "selected_types_by_kind": {family: "unet"},
+            "selected_models": {f"{family}:unet": f"Missing {family}"},
+        }, custom_audio_vae=object() if family == "MiniMaxH3" else None)
+
+        assert captured["entry"] is installed
+        assert captured["selected_type"] == "unet"
+        assert pipe.model_entry is installed
 
     def test_custom_klein_pipe_keeps_klein_model_context(self, monkeypatch):
         custom_model = object()
@@ -1494,8 +1602,8 @@ class TestLocalModelInventory:
         assert _local_model_family("klein-2-9b/flux-2-klein-base-4b.safetensors", "unet") is None
         assert _local_model_family("qwen/qwen-image-edit-2511-local.gguf", "unet") is None
         assert _local_model_family("MiniMax-H3/custom-h3.safetensors", "unet") == ("MiniMaxH3", "unet")
-        assert _local_model_family("Anima/anima-custom.safetensors", "unet") is None
-        assert _local_model_family("Illustrious/customMix.safetensors", "checkpoint") is None
+        assert _local_model_family("Anima/anima-custom.safetensors", "unet") == ("Anima", "unet")
+        assert _local_model_family("Illustrious/customMix.safetensors", "checkpoint") == ("Illustrious", "checkpoint")
         assert _local_model_family("flux/random-flux.safetensors", "unet") is None
 
     def test_discovers_qwen_image_21_gguf_from_registered_gguf_folder(self, monkeypatch, tmp_path):
@@ -1563,6 +1671,7 @@ class TestLocalModelInventory:
         entries = _local_model_entries()
         assert {(entry["kind"], entry["type"], entry["name"]) for entry in entries} == {
             ("Klein9b", "unet", "klein-2-9b/msFlux2Klein9B_v5.safetensors"),
+            ("Illustrious", "checkpoint", "Illustrious/localMix.safetensors"),
         }
         assert all(entry["source"] == "local" and entry["local"] is True for entry in entries)
 

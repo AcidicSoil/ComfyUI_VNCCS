@@ -1167,21 +1167,14 @@ app.registerExtension({
                 if (generationSettingsWidget) generationSettingsWidget.hidden = true;
 
                 const generateRandomSeed = () => Math.floor(Math.random() * 9007199254740991);
-                const ANIMA_TURBO_LORA_NAME = "anima\\anima-turbo-lora-v0.1.safetensors";
-                const ANIMA_CLIP_NAME = "qwen_3_06b_base.safetensors";
-                const ANIMA_VAE_NAME = "qwen_image_vae.safetensors";
-                const QI2_TURBO_LORA_NAME = "QI2/Viggle/Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r128.safetensors";
-                const QI2_MODEL_NAME = "qwen_image_2.1_int8_convrot.safetensors";
-                const QI2_CLIP_NAME = "qwen3vl_8b_int8_convrot.safetensors";
-                const QI2_VAE_NAME = "qwen_image_2.1_vae_bf16.safetensors";
                 const promptStyleForMode = (mode) => String(mode || "anima").toLowerCase() === "anima" ? "Anima" : "SDXL Style";
                 const initialSharedSeed = 0;
                 const GENERATION_DEFAULTS = {
                     generation_mode: "anima",
                     ckpt_name: "",
                     diffusion_model_name: "",
-                    clip_name: ANIMA_CLIP_NAME,
-                    vae_name: ANIMA_VAE_NAME,
+                    clip_name: "",
+                    vae_name: "",
                     clip_type: "stable_diffusion",
                     sampler: "er_sde",
                     scheduler: "simple",
@@ -1191,7 +1184,7 @@ app.registerExtension({
                     seed_mode: "fixed",
                     turbo_enabled: false,
                     turbo_previous_settings: null,
-                    dmd_lora_name: ANIMA_TURBO_LORA_NAME,
+                    dmd_lora_name: "",
                     dmd_lora_strength: 1.0,
                     lora_stack: [
                         { name: "", strength: 1.0 },
@@ -1215,11 +1208,11 @@ app.registerExtension({
                             ]
                         },
                         anima: {
-                            diffusion_model_name: "", clip_name: ANIMA_CLIP_NAME, vae_name: ANIMA_VAE_NAME,
+                            diffusion_model_name: "", clip_name: "", vae_name: "",
                             clip_type: "stable_diffusion", sampler: "er_sde", scheduler: "simple",
                             steps: 30, cfg: 4.0, seed: initialSharedSeed, seed_mode: "fixed",
                             turbo_enabled: false, turbo_previous_settings: null,
-                            dmd_lora_name: ANIMA_TURBO_LORA_NAME, dmd_lora_strength: 1.0,
+                            dmd_lora_name: "", dmd_lora_strength: 1.0,
                             lora_stack: [
                                 { name: "", strength: 1.0 },
                                 { name: "", strength: 1.0 },
@@ -1229,9 +1222,9 @@ app.registerExtension({
                             ]
                         },
                         qi2: {
-                            diffusion_model_name: QI2_MODEL_NAME,
-                            clip_name: QI2_CLIP_NAME,
-                            vae_name: QI2_VAE_NAME,
+                            diffusion_model_name: "",
+                            clip_name: "",
+                            vae_name: "",
                             clip_type: "qwen_image",
                             sampler: "euler",
                             scheduler: "simple",
@@ -1241,7 +1234,7 @@ app.registerExtension({
                             seed_mode: "fixed",
                             turbo_enabled: false,
                             turbo_previous_settings: null,
-                            dmd_lora_name: QI2_TURBO_LORA_NAME,
+                            dmd_lora_name: "",
                             dmd_lora_strength: 1.0,
                             qi2_cache: { device: "gpu", dtype: "int8" },
                             lora_stack: [
@@ -1360,7 +1353,11 @@ app.registerExtension({
                     const dls = ccDlStatus[ccStatusKey(cat, entry)] || {};
                     return transient.has(dls.status) ? dls.status : (entry?.status || "missing");
                 };
-                const ccFirstEntry = (section, kind, predicate = null) => ccEntries(section, kind, predicate)[0] || null;
+                const ccFirstEntry = (section, kind, predicate = null) => {
+                    const entries = ccEntries(section, kind, predicate);
+                    const cat = section === "models" ? "models" : section;
+                    return entries.find(entry => ccResolveStatus(entry, cat) === "installed") || null;
+                };
                 const ccHasRequiredFamilies = (config) => {
                     const models = config?.models || [];
                     const clips = config?.clip || [];
@@ -1507,6 +1504,8 @@ app.registerExtension({
                         seed: sharedSeed,
                         seed_mode: sharedSeedMode,
                     };
+                    if (mode === "anima") ensureAnimaDefaultAux();
+                    if (mode === "qi2") ensureQi2DefaultAux();
                     syncGenerationControls();
                     saveGenerationSettings();
                 }
@@ -1516,7 +1515,7 @@ app.registerExtension({
                     saveGenerationSettings();
                 }
 
-                function setAnimaTurboMode(enabled, loraName = ANIMA_TURBO_LORA_NAME) {
+                function setAnimaTurboMode(enabled, loraName = "") {
                     if ((state.gen.generation_mode || "anima").toLowerCase() !== "anima") return;
                     if (enabled) {
                         if (!state.gen.turbo_enabled) {
@@ -1526,7 +1525,7 @@ app.registerExtension({
                             };
                         }
                         state.gen.turbo_enabled = true;
-                        state.gen.dmd_lora_name = loraName || ANIMA_TURBO_LORA_NAME;
+                        state.gen.dmd_lora_name = loraName || state.gen.dmd_lora_name || "";
                         state.gen.dmd_lora_strength = 1.0;
                         state.gen.steps = 12;
                         state.gen.cfg = 1.0;
@@ -1632,17 +1631,15 @@ app.registerExtension({
                 const ensureAnimaDefaultAux = () => {
                     const clip = ccFirstEntry("clip", "Anima");
                     const vae = ccFirstEntry("vae", "Anima");
-                    if (clip) state.gen.clip_name = ccRelPath(clip);
-                    else if (!state.gen.clip_name) state.gen.clip_name = ANIMA_CLIP_NAME;
-                    if (vae) state.gen.vae_name = ccRelPath(vae);
-                    else if (!state.gen.vae_name) state.gen.vae_name = ANIMA_VAE_NAME;
+                    if (!localAssetHas("clip_name", state.gen.clip_name)) state.gen.clip_name = clip ? ccRelPath(clip) : "";
+                    if (!localAssetHas("vae_name", state.gen.vae_name)) state.gen.vae_name = vae ? ccRelPath(vae) : "";
                 };
 
                 const ensureQi2DefaultAux = () => {
                     const clip = ccFirstEntry("clip", "QI2");
                     const vae = ccFirstEntry("vae", "QI2");
-                    state.gen.clip_name = clip ? ccRelPath(clip) : (state.gen.clip_name || QI2_CLIP_NAME);
-                    state.gen.vae_name = vae ? ccRelPath(vae) : (state.gen.vae_name || QI2_VAE_NAME);
+                    if (!localAssetHas("clip_name", state.gen.clip_name)) state.gen.clip_name = clip ? ccRelPath(clip) : "";
+                    if (!localAssetHas("vae_name", state.gen.vae_name)) state.gen.vae_name = vae ? ccRelPath(vae) : "";
                     state.gen.clip_type = "qwen_image";
                     state.gen.qi2_cache = {
                         device: state.gen.qi2_cache?.device || "gpu",
@@ -1702,7 +1699,7 @@ app.registerExtension({
                             state.gen.turbo_previous_settings = { steps: state.gen.steps, cfg: state.gen.cfg };
                         }
                         state.gen.turbo_enabled = !!enabled;
-                        state.gen.dmd_lora_name = rel || state.gen.dmd_lora_name || QI2_TURBO_LORA_NAME;
+                        state.gen.dmd_lora_name = rel || state.gen.dmd_lora_name || "";
                         state.gen.dmd_lora_strength = enabled ? 1.0 : 0.0;
                         if (enabled) {
                             state.gen.steps = 6;
@@ -2126,10 +2123,10 @@ app.registerExtension({
                         if (!state.gen.ckpt_name && data.checkpoints?.length) state.gen.ckpt_name = data.checkpoints[0];
                         if (!state.gen.diffusion_model_name && data.diffusion_models?.length) state.gen.diffusion_model_name = data.diffusion_models[0];
                         if (!state.gen.clip_name) {
-                            state.gen.clip_name = (data.text_encoders || []).includes(ANIMA_CLIP_NAME) ? ANIMA_CLIP_NAME : (data.text_encoders?.[0] || ANIMA_CLIP_NAME);
+                            state.gen.clip_name = data.text_encoders?.[0] || "";
                         }
                         if (!state.gen.vae_name) {
-                            state.gen.vae_name = (data.vae_models || []).includes(ANIMA_VAE_NAME) ? ANIMA_VAE_NAME : (data.vae_models?.[0] || ANIMA_VAE_NAME);
+                            state.gen.vae_name = data.vae_models?.[0] || "";
                         }
                         syncGenerationControls();
                         saveGenerationSettings();

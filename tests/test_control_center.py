@@ -1712,3 +1712,41 @@ class TestLocalModelInventory:
             "kind": "Klein9b",
             "local_path": "models/diffusion_models/flux-2-klein-9b-fp8.safetensors",
         }]
+    def test_merge_rewrites_catalog_loader_path_to_discovered_registered_path(self, monkeypatch, tmp_path):
+        actual = tmp_path / "anima" / "anima-base-v1.0.safetensors"
+        actual.parent.mkdir(parents=True)
+        actual.write_bytes(b"model")
+        catalog = {
+            "models": [{
+                "name": "Anima Base v1.0",
+                "type": "unet",
+                "kind": "Anima",
+                "local_path": "models/diffusion_models/anima-base-v1.0.safetensors",
+                "version": "1.0",
+            }],
+            "clip": [], "vae": [], "lora": [], "controlnet": [], "other": [],
+        }
+        discovered = {
+            "models": [{
+                "name": "anima/anima-base-v1.0.safetensors",
+                "type": "unet",
+                "kind": "Anima",
+                "local_path": "models/diffusion_models/anima/anima-base-v1.0.safetensors",
+                "source": "local", "local": True,
+            }],
+            "clip": [], "vae": [], "lora": [],
+        }
+        monkeypatch.setattr(_CONTROL_CENTER_MODULE, "_local_asset_entries", lambda: discovered)
+        monkeypatch.setattr(
+            _CONTROL_CENTER_MODULE,
+            "_find_model_on_disk",
+            lambda path: (str(actual), True) if path.endswith("anima-base-v1.0.safetensors") else (path, False),
+        )
+
+        merged = _merge_local_model_inventory(catalog)
+
+        assert len(merged["models"]) == 1
+        assert merged["models"][0]["name"] == "Anima Base v1.0"
+        assert merged["models"][0]["version"] == "1.0"
+        assert merged["models"][0]["local_path"] == "models/diffusion_models/anima/anima-base-v1.0.safetensors"
+        assert catalog["models"][0]["local_path"] == "models/diffusion_models/anima-base-v1.0.safetensors"

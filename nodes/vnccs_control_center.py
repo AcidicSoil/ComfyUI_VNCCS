@@ -1191,14 +1191,29 @@ def _merge_local_model_inventory(config):
     result = dict(config)
     discovered = _local_asset_entries()
     for section in ("models", "clip", "vae", "lora"):
-        catalog = [dict(entry) for entry in config.get(section, []) if isinstance(entry, dict)]
-        known_paths = {
-            os.path.normcase(os.path.abspath(full_path))
-            for entry in catalog
-            for full_path, exists in [_find_model_on_disk(entry.get("local_path", ""))]
-            if exists and full_path
-        }
-        for entry in discovered.get(section, []):
+        local_entries = [dict(entry) for entry in discovered.get(section, []) if isinstance(entry, dict)]
+        local_by_path = {}
+        for entry in local_entries:
+            full_path, exists = _find_model_on_disk(entry.get("local_path", ""))
+            if exists and full_path:
+                local_by_path[os.path.normcase(os.path.abspath(full_path))] = entry
+
+        catalog = []
+        known_paths = set()
+        for source_entry in config.get(section, []):
+            if not isinstance(source_entry, dict):
+                continue
+            entry = dict(source_entry)
+            full_path, exists = _find_model_on_disk(entry.get("local_path", ""))
+            normalized = os.path.normcase(os.path.abspath(full_path)) if exists and full_path else ""
+            discovered_entry = local_by_path.get(normalized) if normalized else None
+            if discovered_entry and discovered_entry.get("local_path"):
+                entry["local_path"] = discovered_entry["local_path"]
+            catalog.append(entry)
+            if normalized:
+                known_paths.add(normalized)
+
+        for entry in local_entries:
             full_path, exists = _find_model_on_disk(entry.get("local_path", ""))
             normalized = os.path.normcase(os.path.abspath(full_path)) if exists and full_path else ""
             if normalized and normalized in known_paths:

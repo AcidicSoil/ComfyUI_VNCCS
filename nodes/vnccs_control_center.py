@@ -926,6 +926,26 @@ def _safetensors_is_qi2(path):
         return False
 
 
+def _safetensors_is_flux1(path):
+    """Detect the Flux.1 input projection without loading model weight data."""
+    try:
+        with open(path, "rb") as handle:
+            raw_size = handle.read(8)
+            if len(raw_size) != 8:
+                return False
+            header_size = struct.unpack("<Q", raw_size)[0]
+            if not 0 < header_size <= _MAX_SAFETENSORS_HEADER_BYTES:
+                return False
+            header = json.loads(handle.read(header_size))
+        for key in ("model.diffusion_model.img_in.weight", "img_in.weight"):
+            entry = header.get(key)
+            if isinstance(entry, dict) and entry.get("shape") == [3072, 64]:
+                return True
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        pass
+    return False
+
+
 def _local_model_family(rel_path, default_type, full_path=None):
     """Classify only active model families VNCCS can load from Control Center."""
     normalized = str(rel_path or "").replace("\\", "/").strip("/")
@@ -949,6 +969,10 @@ def _local_model_family(rel_path, default_type, full_path=None):
 
     if "klein" in filename or any("klein" in part for part in parent_parts):
         if re.search(r"(?:^|[^0-9])4b(?:[^0-9]|$)", identity):
+            return None
+        # A folder name is insufficient: Flux.1 finetunes can be stored in
+        # 'klein/' but their 64-channel input is incompatible with Klein 9B.
+        if ext == ".safetensors" and full_path and _safetensors_is_flux1(full_path):
             return None
         return "Klein9b", model_type
 

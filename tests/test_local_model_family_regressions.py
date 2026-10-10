@@ -14,3 +14,33 @@ def test_real_anima_models_remain_discoverable():
     assert center._local_model_family(
         "anima/animaOverdrive_animaOverdriveV1.safetensors", "unet"
     ) == ("Anima", "unet")
+
+
+def test_flux1_checkpoint_in_klein_folder_is_not_classified_as_klein(tmp_path):
+    import json
+    import struct
+    path = tmp_path / "fluxedUpFluxNSFW_111.safetensors"
+    header = json.dumps({
+        "model.diffusion_model.img_in.weight": {
+            "dtype": "F16", "shape": [3072, 64], "data_offsets": [0, 393216]
+        }
+    }).encode()
+    path.write_bytes(struct.pack("<Q", len(header)) + header)
+    assert center._local_model_family(
+        "klein/fluxedUpFluxNSFW_111.safetensors", "unet", full_path=str(path)
+    ) is None
+
+
+def test_klein9b_checkpoint_header_still_supported(tmp_path):
+    import json
+    import struct
+    path = tmp_path / "working-9b.safetensors"
+    header = json.dumps({
+        "img_in.weight": {
+            "dtype": "F16", "shape": [4096, 128], "data_offsets": [0, 1048576]
+        }
+    }).encode()
+    path.write_bytes(struct.pack("<Q", len(header)) + header)
+    assert center._local_model_family(
+        "klein-2-9b/working-9b.safetensors", "unet", full_path=str(path)
+    ) == ("Klein9b", "unet")

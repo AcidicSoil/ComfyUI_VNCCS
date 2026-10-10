@@ -906,6 +906,7 @@ _QI2_REQUIRED_KEYS = {
 _QI2_MLP_KEYS = {
     "transformer_blocks.0.img_mlp.gate_up.weight",
     "transformer_blocks.0.img_mlp.proj.weight",
+    "transformer_blocks.0.img_mlp.out.weight",
 }
 _MAX_SAFETENSORS_HEADER_BYTES = 32 * 1024 * 1024
 
@@ -920,7 +921,10 @@ def _safetensors_is_qi2(path):
             if not 0 < header_size <= _MAX_SAFETENSORS_HEADER_BYTES:
                 return False
             header = json.loads(handle.read(header_size))
-        keys = set(header) - {"__metadata__"}
+        # ComfyUI models can store the same QI2 tensor names under its
+        # standard model.diffusion_model prefix.
+        prefix = "model.diffusion_model."
+        keys = {key.removeprefix(prefix) for key in header if key != "__metadata__"}
         return _QI2_REQUIRED_KEYS <= keys and bool(_QI2_MLP_KEYS & keys)
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return False

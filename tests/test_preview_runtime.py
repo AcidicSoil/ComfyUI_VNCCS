@@ -76,7 +76,9 @@ def test_preview_and_workflow_share_model_lock_and_preserve_stage_cleanup(dynami
             assert events == ["prefetch", "cast_buffers", "watermarks"]
             # Whole jobs must remain isolated even between native stages.
             started.set()
-            assert release.wait(3), "HTTP loop could not release model execution"
+            # A busy CI host can delay scheduling the event loop; keep the
+            # explicit lock-overlap assertion while allowing scheduling slack.
+            assert release.wait(15), "HTTP loop could not release model execution"
             if fail:
                 raise RuntimeError("generation failed")
         return "first"

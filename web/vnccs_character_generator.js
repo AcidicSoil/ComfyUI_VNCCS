@@ -2379,6 +2379,71 @@ class CharacterGeneratorWidget {
         this.finishRegenerate({ render });
     }
 
+    matchesNativePrompt(workflow) {
+        const node = workflow?.[String(this.node.id)];
+        if (!node || node.class_type !== this.node.type) return false;
+        const raw = node.inputs?.widget_data;
+        try {
+            const payload = JSON.parse(Array.isArray(raw) ? raw[0] : raw);
+            if (!payload || typeof payload !== "object") return false;
+            if (payload.ui?.progress_scope) return payload.ui.progress_scope === this.progressScope();
+            // Legacy prompts were queued without progress_scope. The exact
+            // generator node ID and type are the strongest native identifiers
+            // available; settings may have changed since that prompt ran.
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    async recoverMissingProgress(scope, revision, requestId) {
+        const originalView = this.progressViewKey();
+        const stillCurrent = () => !this._disposed && scope === this.progressScope()
+            && requestId === this.data.ui?.progress_request_id && revision === this._progressRevision
+            && this.progressViewKey() === originalView;
+        const queue = await checkedJSON("/queue");
+        if (!stillCurrent()) return;
+        const running = (queue.queue_running || []).some(item => this.matchesNativePrompt(item?.[2]));
+        const pending = (queue.queue_pending || []).some(item => this.matchesNativePrompt(item?.[2]));
+        if (running || pending) return; // The actual worker is still active.
+        const history = await checkedJSON("/history?max_items=50");
+        if (!stillCurrent()) return;
+        const record = Object.values(history || {}).find(item => {
+            const prompt = item?.prompt?.[2];
+            return this.matchesNativePrompt(prompt);
+        });
+        const messages = record?.status?.messages || [];
+        const failure = [...messages].reverse().find(item =>
+            item?.[0] === "execution_error" || item?.[0] === "execution_interrupted");
+        let status = "waiting";
+        let message = "No active ComfyUI job or progress record. Check ComfyUI history.";
+        if (failure?.[0] === "execution_interrupted") {
+            status = "error";
+            message = "ComfyUI generation was interrupted.";
+        } else if (failure?.[0] === "execution_error") {
+            status = "error";
+            message = String(failure[1]?.exception_message || "ComfyUI generation failed.").slice(0, 400);
+        } else if (record?.status?.status_str === "error") {
+            status = "error";
+            message = "ComfyUI generation failed. Check execution history for details.";
+        } else if (record?.status?.completed === true) {
+            status = "done";
+            message = "Generation completed in ComfyUI. Detailed stage progress is unavailable.";
+        }
+        let changed = false;
+        for (const stage of Object.values(this.stageState)) {
+            if (stage.status === "running" || (stage.status === "error"
+                && stage.message === "Server progress is unavailable. Check the queue before retrying.")) {
+                stage.status = status;
+                stage.message = message;
+                changed = true;
+            }
+        }
+        if (this.regenerateState) this.finishRegenerate();
+        else if (changed) { this.renderPreview(); this.renderChain(); }
+        if (changed) this.saveBrowserState();
+    }
+
     async refreshProgress() {
         const scope = this.progressScope();
         if (!scope || this._progressPending || this._disposed) return;
@@ -2392,17 +2457,9 @@ class CharacterGeneratorWidget {
             if (this._progressEpoch !== epoch && snapshot?.epoch !== this._progressEpoch) return;
             if (!snapshot) {
                 if (this._regenerateRequestPending || revision !== this._progressRevision) return;
-                let changed = false;
-                for (const state of Object.values(this.stageState)) {
-                    if (state.status === "running") {
-                        state.status = "error";
-                        state.message = "Server progress is unavailable. Check the queue before retrying.";
-                        changed = true;
-                    }
-                }
-                if (this.regenerateState) this.finishRegenerate();
-                else if (changed) { this.renderPreview(); this.renderChain(); }
-                if (changed) this.saveBrowserState();
+                const unresolved = Object.values(this.stageState).some(state => state.status === "running"
+                    || (state.status === "error" && state.message === "Server progress is unavailable. Check the queue before retrying."));
+                if (unresolved) await this.recoverMissingProgress(scope, revision, requestId);
                 return;
             }
             if (snapshot.scope !== scope || String(snapshot.node_id) !== String(this.node.id)) return;

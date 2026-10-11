@@ -139,11 +139,14 @@ test('progress snapshots restore missed stages but cannot replace a newer event'
     assert.equal(h.widget.stageState.pose_generation.status, 'running');
 });
 
-test('missing server progress releases stale running UI without starting another job', async () => {
+test('missing server progress without a native job clears stale running state without fabricating failure', async () => {
     const h = generator();
-    h.api.fetchApi = async () => response(200, { snapshot: null });
+    h.api.fetchApi = async route => response(200,
+        route === '/queue' ? { queue_running: [], queue_pending: [] }
+            : route.startsWith('/history?') ? {} : { snapshot: null });
     await h.widget.refreshProgress();
-    assert.equal(h.widget.stageState.pose_generation.status, 'error');
+    assert.equal(h.widget.stageState.pose_generation.status, 'waiting');
+    assert.match(h.widget.stageState.pose_generation.message, /No active ComfyUI job/);
     assert.equal(h.widget.finished, undefined);
 });
 
@@ -510,4 +513,139 @@ test('pending dependency installations stay with their backend and user and igno
     assert.equal(await widget._resumePendingDependencyInstalls(items), false);
     values.set('vnccs-control-center-pending-dependency-installs', JSON.stringify(['package']));
     assert.equal(await widget._resumePendingDependencyInstalls(items), false);
+});
+
+test('missing progress snapshot uses native queue before declaring a running pose failed', async () => {
+    const h = generator();
+    h.widget.stageState.pose_generation = {
+        status: 'running', message: 'Sampling poses', current: 10, total: 18,
+    };
+    const scope = h.widget.progressScope();
+    const workflow = { 5: { class_type: 'VNCCS_CharacterGenerator', inputs: {
+        widget_data: JSON.stringify({ ui: { progress_scope: scope } }),
+    } } };
+    const queried = [];
+    h.api.fetchApi = async route => {
+        queried.push(route);
+        if (route.includes('/character_generator/progress')) return response(200, { snapshot: null });
+        if (route === '/queue') return response(200, {
+            queue_running: [[1, 'active-prompt', workflow]], queue_pending: [],
+        });
+        throw new Error('Unexpected route ' + route);
+    };
+    await h.widget.refreshProgress();
+    assert.equal(h.widget.stageState.pose_generation.status, 'running');
+    assert.equal(h.widget.stageState.pose_generation.current, 10);
+    assert.ok(queried.includes('/queue'), 'fallback must check actual ComfyUI queue');
+});
+
+
+test('missing progress snapshot recovers the actual interrupted error from legacy ComfyUI history', async () => {
+    const h = generator();
+    const legacy = JSON.stringify({
+        pose_generation: { target_size: 2048, steps: 30 }, ui: {},
+    });
+    const prompt = { 5: { class_type: 'VNCCS_CharacterGenerator', inputs: {
+        widget_data: legacy,
+    } } };
+    h.widget.stageState.pose_generation = {
+        status: 'error',
+        message: 'Server progress is unavailable. Check the queue before retrying.',
+        current: 10, total: 8,
+    };
+    const routes = [];
+    h.api.fetchApi = async route => {
+        routes.push(route);
+        if (route.includes('/character_generator/progress')) return response(200, { snapshot: null });
+        if (route === '/queue') return response(200, { queue_running: [], queue_pending: [] });
+        if (route.startsWith('/history?')) return response(200, {
+            'interrupted-job': { prompt: [0, 'interrupted-job', prompt], status: {
+                status_str: 'error', completed: false,
+                messages: [['execution_interrupted', { node_id: '5' }]],
+            } },
+        });
+        throw Error('unexpected path ' + route);
+    };
+    await h.widget.refreshProgress();
+    assert.equal(h.widget.stageState.pose_generation.status, 'error');
+    assert.equal(h.widget.stageState.pose_generation.message, 'ComfyUI generation was interrupted.');
+    assert.equal(h.widget.stageState.pose_generation.current, 10);
+    assert.ok(routes.some(route => route.startsWith('/history?')));
+});
+
+test('missing snapshot recovers completion only from matching workflow scope', async () => {
+    const h = generator();
+    const payload = { pose_generation: h.widget.data.pose_generation,
+        ui: { progress_scope: h.widget.progressScope() } };
+    const bad = { ...payload, ui: { progress_scope: 'unrelated-workflow:5' } };
+    h.api.fetchApi = async route => {
+        if (route.includes('/character_generator/progress')) return response(200, { snapshot: null });
+        if (route === '/queue') return response(200, { queue_running: [], queue_pending: [] });
+        if (route.startsWith('/history?')) return response(200, {
+            irrelevant: { prompt: [0, 'bad', { 5: {
+                class_type: 'VNCCS_CharacterGenerator', inputs: { widget_data: JSON.stringify(bad) },
+            } }], status: { completed: false, status_str: 'error',
+                messages: [['execution_error', { exception_message: 'Other workflow failed' }]] } },
+            actual: { prompt: [0, 'good', { 5: {
+                class_type: 'VNCCS_CharacterGenerator', inputs: { widget_data: JSON.stringify(payload) },
+            } }], status: { completed: true, status_str: 'success', messages: [] } },
+        });
+        throw Error('unexpected path ' + route);
+    };
+    await h.widget.refreshProgress();
+    assert.equal(h.widget.stageState.pose_generation.status, 'done');
+    assert.match(h.widget.stageState.pose_generation.message, /completed in ComfyUI/);
+});
+
+test('a stale queue/history lookup must not overwrite newer live progress', async () => {
+    const h = generator();
+    let resolveQueue;
+    h.api.fetchApi = route => {
+        if (route.includes('/character_generator/progress')) return Promise.resolve(response(200, { snapshot: null }));
+        if (route === '/queue') return new Promise(done => { resolveQueue = done; });
+        throw Error('unexpected path ' + route);
+    };
+    const refresh = h.widget.refreshProgress();
+    await new Promise(done => setImmediate(done));
+    h.widget._progressRevision = 23;
+    h.widget.stageState.pose_generation.status = 'done';
+    resolveQueue(response(200, { queue_running: [], queue_pending: [] }));
+    await refresh;
+    assert.equal(h.widget.stageState.pose_generation.status, 'done');
+});
+
+test('recovery from missing snapshot ignores later unscoped live events', async () => {
+    const h = generator();
+    let resolveQueue;
+    h.api.fetchApi = route => {
+        if (route.includes('/character_generator/progress')) return Promise.resolve(response(200, { snapshot: null }));
+        if (route === '/queue') return new Promise(done => { resolveQueue = done; });
+        if (route.startsWith('/history?')) return Promise.resolve(response(200, {}));
+        throw Error('unexpected path ' + route);
+    };
+    const refresh = h.widget.refreshProgress();
+    await new Promise(done => setImmediate(done));
+    h.widget.stageState.pose_generation = {
+        status: 'running', message: 'Sampling pose 11', current: 11, total: 18,
+    };
+    resolveQueue(response(200, { queue_running: [], queue_pending: [] }));
+    await refresh;
+    assert.equal(h.widget.stageState.pose_generation.status, 'running');
+    assert.equal(h.widget.stageState.pose_generation.message, 'Sampling pose 11');
+});
+
+
+test('native history failures without detailed messages remain errors, not idle states', async () => {
+    const h = generator();
+    const workflow = { 5: { class_type: 'VNCCS_CharacterGenerator', inputs: {
+        widget_data: JSON.stringify({ ui: { progress_scope: h.widget.progressScope() } }),
+    } } };
+    h.api.fetchApi = async route => response(200,
+        route.includes('/character_generator/progress') ? { snapshot: null }
+            : route === '/queue' ? { queue_running: [], queue_pending: [] }
+                : { record: { prompt: [1, 'failed', workflow],
+                    status: { status_str: 'error', completed: false, messages: [] } } });
+    await h.widget.refreshProgress();
+    assert.equal(h.widget.stageState.pose_generation.status, 'error');
+    assert.match(h.widget.stageState.pose_generation.message, /Check execution history/);
 });

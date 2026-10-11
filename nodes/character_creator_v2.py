@@ -32,7 +32,7 @@ from ..utils import (
     character_storage_lock,
 )
 from .vnccs_utils import _ensure_qwen_vl_assets, _find_qwen_vl_model, QWEN_VL_MODEL_FILENAME
-from .runtime_cleanup import inference_stage
+from .runtime_cleanup import inference_stage, inference_lock
 from .qwen_vl import configure_qwen_text_chat
 from .character_presets import CHARACTER_PRESETS, RACE_PRESETS, preset_key, race_features, race_prompt
 from .character_styles import (
@@ -2367,10 +2367,56 @@ class CharacterCreatorV2:
         )
 
 
+
+class VNCCSStudioCastingPreview:
+    """Submit Casting previews through ComfyUI's actual /prompt executor."""
+
+    OUTPUT_NODE = True
+    RETURN_TYPES = ()
+    FUNCTION = "generate"
+    CATEGORY = "VNCCS/Studio"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "request_json": ("STRING", {"multiline": True}),
+            "nonce": ("STRING", {"default": ""}),
+        }}
+
+    def generate(self, request_json, nonce=""):
+        data = json.loads(request_json)
+        if not isinstance(data, dict) or not isinstance(data.get("gen_settings"), dict):
+            raise ValueError("Studio Casting preview requires generation settings")
+        # Keep direct style previews and native workflow stages from racing
+        # the shared preview model cache while this queued node executes.
+        with inference_lock:
+            response = _generate_preview_response(data)
+        if response.status != 200:
+            raise RuntimeError(f"Studio Casting generation failed: {response.text}")
+        payload = json.loads(response.text)
+        image_bytes = base64.b64decode(payload["image"], validate=True)
+        if not image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise ValueError("Casting preview returned an invalid PNG")
+        # History/UI descriptors use ComfyUI's standard /view endpoint.
+        # Do not depend on the mutable per-character preview cache.
+        from uuid import uuid4
+        subfolder = "VNCCSStudioCasting"
+        temp_dir = os.path.join(folder_paths.get_temp_directory(), subfolder)
+        os.makedirs(temp_dir, exist_ok=True)
+        filename = f"casting-{uuid4().hex}.png"
+        with atomic_output_path(os.path.join(temp_dir, filename)) as output:
+            with open(output, "wb") as handle:
+                handle.write(image_bytes)
+        return {"ui": {"images": [{
+            "filename": filename, "subfolder": subfolder, "type": "temp",
+        }]}}
+
 NODE_CLASS_MAPPINGS = {
     "CharacterCreatorV2": CharacterCreatorV2,
+    "VNCCSStudioCastingPreview": VNCCSStudioCastingPreview,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "CharacterCreatorV2": "VNCCS Character Creator V2",
+    "VNCCSStudioCastingPreview": "VNCCS Studio Casting Preview",
 }
